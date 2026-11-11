@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Why a finding is shown.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub enum Status {
     /// Removed by the user or an app, but some or all of it is still there.
@@ -14,7 +14,7 @@ pub enum Status {
 }
 
 /// Where the evidence came from. Decides how much of the item survives.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub enum Source {
     /// A whole file sitting in a trash or recycle folder.
@@ -32,7 +32,7 @@ pub enum Source {
 }
 
 /// What kind of content it is, for filtering and for choosing a preview.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub enum Media {
     Image,

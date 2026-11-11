@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Results } from "./components/Results";
-import { ScanPanel } from "./components/ScanPanel";
+import { ScanPanel, type Stage } from "./components/ScanPanel";
 import { Sidebar } from "./components/Sidebar";
 import {
   cancelScan,
@@ -11,28 +11,25 @@ import {
   scan,
   type Device,
   type Discovery,
-  type Progress,
   type ScanSummary,
 } from "./lib/native";
-
-type Stage =
-  | { kind: "idle" }
-  | { kind: "scanning"; progress: Progress | null }
-  | { kind: "done"; summary: ScanSummary }
-  | { kind: "failed"; message: string };
 
 const message = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
 /**
  * Pick a device on the left, press Scan, and see only what was deleted or
- * damaged on it, laid out on a timeline.
+ * damaged on it.
+ *
+ * Colour carries state and nothing else: the window is black while idle,
+ * amber while Banker works, red once deleted items are on screen. The
+ * `data-state` attribute on the shell drives it (see styles.css).
  */
 export function App() {
   const [discovery, setDiscovery] = useState<Discovery>({ devices: [], hints: [] });
   const [looking, setLooking] = useState(false);
   const [selected, setSelected] = useState<Device | null>(null);
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
-  const [scanned, setScanned] = useState<Device | null>(null);
+  const [scanned, setScanned] = useState<{ device: Device; summary: ScanSummary } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!nativeAvailable()) return;
@@ -48,7 +45,7 @@ export function App() {
 
   useEffect(() => {
     void refresh();
-    // Devices come and go; look again every few seconds while idle.
+    // Devices come and go; look again every few seconds while visible.
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
     }, 8000);
@@ -57,7 +54,7 @@ export function App() {
 
   useEffect(() => {
     const stop = onProgress((progress) =>
-      setStage((s) => (s.kind === "scanning" ? { kind: "scanning", progress } : s)),
+      setStage((s) => (s.kind === "scanning" ? { ...s, progress } : s)),
     );
     return () => {
       void stop.then((f) => f());
@@ -66,26 +63,30 @@ export function App() {
 
   const start = async (device: Device) => {
     setSelected(device);
-    setStage({ kind: "scanning", progress: null });
+    setStage({ kind: "scanning", device, progress: null });
     try {
       const summary = await scan(device);
-      setScanned(device);
-      setStage({ kind: "done", summary });
+      setScanned({ device, summary });
+      setStage({ kind: "idle" });
     } catch (cause) {
       setStage({ kind: "failed", message: message(cause) });
     }
   };
 
-  const busy = stage.kind === "scanning";
-  const showResults = stage.kind === "done" && scanned !== null && scanned.id === selected?.id;
+  const working = stage.kind === "scanning";
+  const showResults = !working && scanned !== null && scanned.device.id === selected?.id;
+  const state = working ? "working" : showResults && scanned.summary.findings > 0 ? "found" : "idle";
 
   return (
-    <div className="shell">
+    <div className="shell" data-state={state}>
       <Sidebar
         discovery={discovery}
         looking={looking}
         selected={selected}
-        disabled={busy}
+        scanningId={working ? stage.device.id : null}
+        foundId={scanned && scanned.summary.findings > 0 ? scanned.device.id : null}
+        compact={showResults}
+        disabled={working}
         onSelect={(d) => {
           setSelected(d);
           if (stage.kind === "failed") setStage({ kind: "idle" });
@@ -99,11 +100,11 @@ export function App() {
             devices.
           </p>
         )}
-        {showResults && stage.kind === "done" ? (
+        {showResults ? (
           <Results
-            device={scanned}
-            summary={stage.summary}
-            onRescan={() => void start(scanned)}
+            device={scanned.device}
+            summary={scanned.summary}
+            onRescan={() => void start(scanned.device)}
           />
         ) : (
           <ScanPanel

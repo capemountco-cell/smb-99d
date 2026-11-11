@@ -75,12 +75,12 @@ export function Timeline({ crumbs, buckets, onCrumb, onZoom, onPick }: Props) {
               className="bar"
               disabled={leaf}
               onClick={() => onPick(b)}
-              title={`${b.label}: ${b.count.toLocaleString()} (${b.images.toLocaleString()} photos)`}
+              title={`${b.label}: ${(b.count - b.corrupt).toLocaleString()} deleted, ${b.corrupt.toLocaleString()} damaged`}
             >
               <span className="bar-count">{b.count.toLocaleString()}</span>
               <span className="bar-fill" style={{ height: `${8 + (b.count / max) * 92}%` }}>
-                {b.images > 0 && (
-                  <span className="bar-images" style={{ height: `${(b.images / b.count) * 100}%` }} />
+                {b.corrupt > 0 && (
+                  <span className="bar-damaged" style={{ height: `${(b.corrupt / b.count) * 100}%` }} />
                 )}
               </span>
               <span className="bar-label">{b.label}</span>
@@ -138,12 +138,13 @@ function Calendar({
                     </span>
                   );
                 }
-                const heat = 0.18 + (b.count / max) * 0.82;
+                const heat = 0.3 + (b.count / max) * 0.7;
+                const onlyDamaged = b.corrupt === b.count;
                 return (
                   <button
                     key={day}
                     type="button"
-                    className="cal-day hit"
+                    className={`cal-day hit ${onlyDamaged ? "damaged" : "deleted"}`}
                     style={{ ["--heat" as string]: heat }}
                     onClick={() => onPick(b)}
                     title={`${b.label}: ${b.count.toLocaleString()}`}

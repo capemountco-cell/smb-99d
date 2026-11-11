@@ -1,63 +1,94 @@
 import { useState } from "react";
 
-import { DEVICE_GLYPH } from "../lib/format";
+import { DEVICE_ICON } from "../lib/format";
 import type { Device, Discovery } from "../lib/native";
+import { Icon } from "./Icon";
 
 interface Props {
   discovery: Discovery;
   looking: boolean;
   selected: Device | null;
+  /** The device being scanned: amber. */
+  scanningId: string | null;
+  /** The device whose results are on screen and include deletions: red. */
+  foundId: string | null;
+  /** Icons only, to give results room. */
+  compact: boolean;
   disabled: boolean;
   onSelect: (device: Device) => void;
   onRefresh: () => void;
 }
 
-export function Sidebar({ discovery, looking, selected, disabled, onSelect, onRefresh }: Props) {
+export function Sidebar(props: Props) {
+  const { discovery, looking, selected, scanningId, foundId, compact, disabled, onSelect, onRefresh } =
+    props;
   const [folder, setFolder] = useState("");
   const connected = discovery.devices.filter((d) => d.kind !== "backup");
   const backups = discovery.devices.filter((d) => d.kind === "backup");
 
-  const row = (d: Device) => (
-    <li key={d.id}>
-      <button
-        type="button"
-        className={`device ${selected?.id === d.id ? "selected" : ""}`}
-        disabled={disabled}
-        onClick={() => onSelect(d)}
-      >
-        <span className="glyph" aria-hidden>
-          {DEVICE_GLYPH[d.kind]}
-        </span>
-        <span className="device-text">
-          <span className="device-name">{d.name}</span>
-          <span className="device-detail">{d.problem ?? d.detail}</span>
-        </span>
-        {d.problem && <span className="dot warn" title={d.problem} />}
-      </button>
-    </li>
-  );
+  const marker = (d: Device) => {
+    if (d.id === scanningId) return <span className="dot working" title="Scanning" />;
+    if (d.problem) return <span className="dot waiting" title={d.problem} />;
+    if (d.id === foundId) return <span className="dot deleted" title="Deleted items found" />;
+    return null;
+  };
 
-  return (
-    <aside className="sidebar">
-      <header className="sidebar-head">
-        <h1>Banker</h1>
+  const row = (d: Device) => {
+    const state = d.id === scanningId ? "working" : selected?.id === d.id ? "selected" : "";
+    return (
+      <li key={d.id}>
         <button
           type="button"
-          className="ghost small"
-          onClick={onRefresh}
-          disabled={looking || disabled}
-          title="Look for devices again"
+          className={`device ${state}`}
+          disabled={disabled && d.id !== scanningId}
+          onClick={() => onSelect(d)}
+          aria-label={compact ? d.name : undefined}
+          title={compact ? d.name : undefined}
         >
-          {looking ? "Looking…" : "Refresh"}
+          <Icon name={DEVICE_ICON[d.kind]} size={20} />
+          {!compact && (
+            <span className="device-text">
+              <span className="device-name">{d.name}</span>
+              <span className="device-detail">
+                {d.id === scanningId ? "Scanning…" : (d.problem ?? d.detail)}
+              </span>
+            </span>
+          )}
+          {marker(d)}
         </button>
+      </li>
+    );
+  };
+
+  return (
+    <aside className={`sidebar ${compact ? "compact" : ""}`}>
+      <header className="brand">
+        <span className="brand-mark">
+          <Icon name="search" size={16} stroke={2.2} />
+        </span>
+        {!compact && <span className="brand-name">Banker</span>}
+        {!compact && (
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onRefresh}
+            disabled={looking || disabled}
+            aria-label="Look for devices again"
+            title="Look for devices again"
+          >
+            <Icon name="refresh" size={15} />
+          </button>
+        )}
       </header>
 
       <section>
-        <h2>Connected</h2>
+        {!compact && <h2>Connected</h2>}
         {connected.length === 0 ? (
-          <p className="muted small-text">
-            Plug in a drive, iPhone or Android phone with a cable. It appears here.
-          </p>
+          !compact && (
+            <p className="muted small-text pad">
+              Plug in a drive, iPhone or Android phone with a cable. It appears here.
+            </p>
+          )
         ) : (
           <ul className="devices">{connected.map(row)}</ul>
         )}
@@ -65,48 +96,50 @@ export function Sidebar({ discovery, looking, selected, disabled, onSelect, onRe
 
       {backups.length > 0 && (
         <section>
-          <h2>iPhone backups on this Mac</h2>
+          {!compact && <h2>Backups on this Mac</h2>}
           <ul className="devices">{backups.map(row)}</ul>
         </section>
       )}
 
-      <section>
-        <h2>A folder</h2>
-        <form
-          className="folder-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const path = folder.trim();
-            if (!path) return;
-            onSelect({
-              id: `folder:${path}`,
-              kind: "folder",
-              name: path.split("/").filter(Boolean).pop() ?? path,
-              detail: path,
-              path,
-              problem: null,
-            });
-          }}
-        >
-          <input
-            value={folder}
-            onChange={(e) => setFolder(e.target.value)}
-            placeholder="/Volumes/Card or ~/Backups"
-            aria-label="Folder to scan"
-            disabled={disabled}
-          />
-          <button type="submit" className="ghost small" disabled={disabled}>
-            Use
-          </button>
-        </form>
-      </section>
+      {!compact && (
+        <section>
+          <h2>A folder</h2>
+          <form
+            className="folder-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const path = folder.trim();
+              if (!path) return;
+              onSelect({
+                id: `folder:${path}`,
+                kind: "folder",
+                name: path.split("/").filter(Boolean).pop() ?? path,
+                detail: path,
+                path,
+                problem: null,
+              });
+            }}
+          >
+            <input
+              value={folder}
+              onChange={(e) => setFolder(e.target.value)}
+              placeholder="/Volumes/Card"
+              aria-label="Folder to scan"
+              disabled={disabled}
+            />
+            <button type="submit" className="ghost small" disabled={disabled}>
+              Use
+            </button>
+          </form>
+        </section>
+      )}
 
-      {discovery.hints.length > 0 && (
+      {!compact && discovery.hints.length > 0 && (
         <section className="hints">
           <h2>To see more devices</h2>
           {discovery.hints.map((h) => (
             <div key={h.tool} className="hint">
-              <p className="small-text">
+              <p className="small-text muted">
                 Install {h.tool} {h.why}:
               </p>
               <code className="selectable">{h.install}</code>
@@ -114,6 +147,11 @@ export function Sidebar({ discovery, looking, selected, disabled, onSelect, onRe
           ))}
         </section>
       )}
+
+      <footer className="sidebar-foot">
+        {!compact && <span>Reads only. Nothing on a device is changed.</span>}
+        <span className="faint">{compact ? "0.1" : "Version 0.1.0"}</span>
+      </footer>
     </aside>
   );
 }

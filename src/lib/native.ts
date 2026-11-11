@@ -95,7 +95,8 @@ export interface Bucket {
   end: number;
   label: string;
   count: number;
-  images: number;
+  /** How many of `count` are damaged rather than deleted. */
+  corrupt: number;
 }
 
 export interface AppCount {
@@ -112,6 +113,8 @@ export interface QueryResult {
   apps: AppCount[];
   deleted: number;
   corrupt: number;
+  byMedia: Partial<Record<Media, number>>;
+  bySource: Partial<Record<Source, number>>;
 }
 
 export interface Exported {

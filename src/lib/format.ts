@@ -2,6 +2,7 @@
  * Display helpers. Pure functions only: what to show, never what to find.
  */
 
+import type { IconName } from "../components/Icon";
 import type { DeviceKind, Media, Source, Zoom } from "./native";
 
 export const ZOOMS: Zoom[] = ["year", "month", "day", "hour", "minute"];
@@ -37,12 +38,12 @@ export function when(unix: number | null, estimated: boolean): string {
   return estimated ? `≈ ${text}` : text;
 }
 
-export const DEVICE_GLYPH: Record<DeviceKind, string> = {
-  drive: "💽",
-  iphone: "📱",
-  android: "🤖",
-  backup: "🗂️",
-  folder: "📁",
+export const DEVICE_ICON: Record<DeviceKind, IconName> = {
+  drive: "drive",
+  iphone: "iphone",
+  android: "android",
+  backup: "folder",
+  folder: "folder",
 };
 
 export const MEDIA_LABEL: Record<Media, string> = {
@@ -56,15 +57,15 @@ export const MEDIA_LABEL: Record<Media, string> = {
   other: "Other",
 };
 
-export const MEDIA_GLYPH: Record<Media, string> = {
-  image: "🖼️",
-  video: "🎞️",
-  audio: "🎵",
-  document: "📄",
-  archive: "🗜️",
-  text: "💬",
-  database: "🗄️",
-  other: "📦",
+export const MEDIA_ICON: Record<Media, IconName> = {
+  image: "photo",
+  video: "video",
+  audio: "audio",
+  document: "document",
+  archive: "archive",
+  text: "message",
+  database: "database",
+  other: "file",
 };
 
 export const SOURCE_LABEL: Record<Source, string> = {

@@ -1,11 +1,11 @@
 //! Searching, filtering and grouping findings on a timeline, from years down
 //! to single minutes.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Finding, Media, Status};
+use crate::model::{Finding, Media, Source, Status};
 use crate::paths::app_display_name;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,7 +59,8 @@ pub struct Bucket {
     pub end: i64,
     pub label: String,
     pub count: usize,
-    pub images: usize,
+    /// How many of `count` are damaged rather than deleted.
+    pub corrupt: usize,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -82,6 +83,9 @@ pub struct QueryResult {
     pub apps: Vec<AppCount>,
     pub deleted: usize,
     pub corrupt: usize,
+    /// Matching findings by kind of content and by where they were found.
+    pub by_media: BTreeMap<Media, usize>,
+    pub by_source: BTreeMap<Source, usize>,
 }
 
 /// Days since 1970-01-01 for a proleptic Gregorian date.
@@ -246,13 +250,13 @@ pub fn query(findings: &[Finding], q: &Query) -> QueryResult {
                 end: end - offset,
                 label: label(start, q.zoom),
                 count: 0,
-                images: 0,
+                corrupt: 0,
             });
             buckets.len() - 1
         });
         buckets[i].count += 1;
-        if f.media == Media::Image {
-            buckets[i].images += 1;
+        if f.status == Status::Corrupt {
+            buckets[i].corrupt += 1;
         }
     }
     buckets.sort_by_key(|b| b.start);
@@ -263,6 +267,12 @@ pub fn query(findings: &[Finding], q: &Query) -> QueryResult {
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => a.id.cmp(&b.id),
     });
+    let mut by_media = BTreeMap::new();
+    let mut by_source = BTreeMap::new();
+    for f in &selected {
+        *by_media.entry(f.media).or_insert(0) += 1;
+        *by_source.entry(f.source).or_insert(0) += 1;
+    }
     let total = selected.len();
     let undated = selected.iter().filter(|f| f.time.is_none()).count();
     let deleted = selected
@@ -277,6 +287,8 @@ pub fn query(findings: &[Finding], q: &Query) -> QueryResult {
         apps,
         deleted,
         corrupt: total - deleted,
+        by_media,
+        by_source,
     }
 }
 
@@ -341,6 +353,8 @@ mod tests {
         };
         let r = query(&fs, &q);
         assert_eq!(r.total, 2);
+        assert_eq!(r.by_media.get(&Media::Image), Some(&2));
+        assert_eq!(r.by_source.get(&Source::TrashFolder), Some(&2));
         assert_eq!(r.undated, 1);
         assert_eq!(r.items[0].id, 1); // dated first
         assert_eq!(r.apps.len(), 2); // app list ignores the app filter

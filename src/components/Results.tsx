@@ -16,7 +16,9 @@ import {
   type Status,
   type Zoom,
 } from "../lib/native";
+import { Icon } from "./Icon";
 import { Detail, FindingCard } from "./Items";
+import { Overview, type Pick } from "./Overview";
 import { Timeline } from "./Timeline";
 
 interface Crumb {
@@ -36,7 +38,11 @@ interface Props {
   onRescan: () => void;
 }
 
+type Save = { kind: "idle" } | { kind: "saving" } | { kind: "saved"; result: Exported };
+
+/** Results: an overview of what was found, then the timeline behind it. */
 export function Results({ device, summary, onRescan }: Props) {
+  const [view, setView] = useState<"overview" | "timeline">("overview");
   const [text, setText] = useState("");
   const [debounced, setDebounced] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
@@ -47,8 +53,7 @@ export function Results({ device, summary, onRescan }: Props) {
   const [result, setResult] = useState<QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Finding | null>(null);
-  const [saved, setSaved] = useState<Exported | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [save, setSave] = useState<Save>({ kind: "idle" });
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebounced(text), 200);
@@ -72,6 +77,7 @@ export function Results({ device, summary, onRescan }: Props) {
   );
 
   useEffect(() => {
+    if (view !== "timeline") return;
     let live = true;
     query(q)
       .then((r) => live && (setResult(r), setError(null)))
@@ -79,98 +85,113 @@ export function Results({ device, summary, onRescan }: Props) {
     return () => {
       live = false;
     };
-  }, [q]);
+  }, [q, view]);
 
   useEffect(() => setLimit(PAGE), [debounced, app, status, media, here]);
 
-  const save = async () => {
-    setSaving(true);
+  const saveMatching = async (which: Query) => {
+    setSave({ kind: "saving" });
     try {
-      setSaved(await exportMatching(q));
+      setSave({ kind: "saved", result: await exportMatching(which) });
     } catch (e) {
       setError(String(e));
-    } finally {
-      setSaving(false);
+      setSave({ kind: "idle" });
     }
   };
 
-  const chip = <T,>(value: T | null, current: T | null, set: (v: T | null) => void, label: string) => (
+  const openPick = (pick: Pick) => {
+    setStatus(pick.status);
+    setMedia(pick.media);
+    setApp(pick.app ?? null);
+    setText("");
+    setCrumbs([ALL_TIME]);
+    setView("timeline");
+  };
+
+  const chip = <T,>(value: T | null, current: T | null, set: (v: T | null) => void, label: string, dot?: string) => (
     <button
       key={label}
       type="button"
       className={`chip ${current === value ? "on" : ""}`}
       onClick={() => set(value)}
     >
+      {dot && <span className={`dot ${dot}`} />}
       {label}
     </button>
   );
 
+  const saveBanner = save.kind === "saved" && (
+    <p className="banner saved">
+      <Icon name="check" size={15} stroke={2.4} />
+      Saved {count(save.result.files, "file")} and {count(save.result.records, "record")} to{" "}
+      <button type="button" className="link" onClick={() => void reveal(save.result.folder)}>
+        {save.result.folder}
+      </button>
+      {save.result.failed > 0 && ` (${save.result.failed} could not be copied)`}
+    </p>
+  );
+
+  if (view === "overview") {
+    return (
+      <Overview
+        device={device}
+        summary={summary}
+        saving={save.kind === "saving"}
+        banner={saveBanner || null}
+        onRescan={onRescan}
+        onPick={openPick}
+        onSaveAll={() =>
+          void saveMatching({ ...ALL_QUERY, tzOffsetMinutes: localOffsetMinutes() })
+        }
+      />
+    );
+  }
+
   return (
     <div className="results">
-      <header className="results-head">
-        <div>
-          <h2>{device.name}</h2>
-          <p className="muted small-text">
-            {count(summary.filesChecked, "file")} and {count(summary.databasesChecked, "app database")}{" "}
-            checked
-            {result && (
-              <>
-                {" · "}
-                <strong>{count(result.deleted, "deleted item")}</strong>
-                {" · "}
-                <strong>{count(result.corrupt, "damaged item")}</strong> shown
-              </>
-            )}
-          </p>
-        </div>
-        <div className="row">
-          <button type="button" className="ghost" onClick={onRescan}>
-            Scan again
-          </button>
-          <button type="button" onClick={() => void save()} disabled={saving || !result?.total}>
-            {saving ? "Saving…" : "Save these to Mac"}
-          </button>
-        </div>
+      <header className="topbar">
+        <button type="button" className="back" onClick={() => setView("overview")}>
+          <Icon name="back" size={16} stroke={2} />
+          Overview
+        </button>
+        <span className="muted">{device.name} · Timeline</span>
+        <button
+          type="button"
+          className={save.kind === "saving" ? "working-button" : "primary"}
+          onClick={() => void saveMatching({ ...q, limit: PAGE })}
+          disabled={save.kind === "saving" || !result?.total}
+        >
+          {save.kind === "saving" ? "Saving…" : "Save these to Mac"}
+        </button>
       </header>
 
-      {summary.notes.map((n) => (
-        <p key={n} className="banner selectable">
-          {n}
-        </p>
-      ))}
-      {saved && (
-        <p className="banner ok">
-          Saved {count(saved.files, "file")} and {count(saved.records, "record")} to{" "}
-          <button type="button" className="link" onClick={() => void reveal(saved.folder)}>
-            {saved.folder}
-          </button>
-          {saved.failed > 0 && ` (${saved.failed} could not be copied)`}
-        </p>
-      )}
+      {saveBanner}
       {error && <p className="banner error selectable">{error}</p>}
 
       <div className="filters">
-        <input
-          className="search"
-          type="search"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Search names, apps and recovered text"
-          aria-label="Search"
-        />
-        <div className="chips">
+        <label className="search">
+          <Icon name="search" size={16} stroke={2} />
+          <input
+            type="search"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Search names, apps and recovered text"
+            aria-label="Search"
+          />
+        </label>
+        <div className="segmented" role="group" aria-label="Show">
           {chip<Status>(null, status, setStatus, "Everything")}
-          {chip<Status>("deleted", status, setStatus, "Deleted")}
-          {chip<Status>("corrupt", status, setStatus, "Damaged")}
+          {chip<Status>("deleted", status, setStatus, "Deleted", "deleted")}
+          {chip<Status>("corrupt", status, setStatus, "Damaged", "damaged")}
         </div>
-        <div className="chips">
-          {chip<Media>(null, media, setMedia, "All kinds")}
-          {MEDIA_FILTERS.map((m) => chip<Media>(m, media, setMedia, MEDIA_LABEL[m]))}
-        </div>
+      </div>
+      <div className="chips">
+        {chip<Media>(null, media, setMedia, "All kinds")}
+        {MEDIA_FILTERS.map((m) => chip<Media>(m, media, setMedia, MEDIA_LABEL[m]))}
       </div>
 
       {result && result.apps.length > 0 && (
-        <div className="apps" role="list" aria-label="Apps">
+        <div className="apps" role="group" aria-label="Apps">
           <button
             type="button"
             className={`app-pill ${app === null ? "on" : ""}`}
@@ -200,9 +221,7 @@ export function Results({ device, summary, onRescan }: Props) {
         crumbs={crumbs}
         buckets={result?.buckets ?? []}
         onCrumb={(i) => setCrumbs(crumbs.slice(0, i + 1))}
-        onZoom={(zoom) =>
-          setCrumbs([...crumbs.slice(0, -1), { ...here, zoom }])
-        }
+        onZoom={(zoom) => setCrumbs([...crumbs.slice(0, -1), { ...here, zoom }])}
         onPick={(b) =>
           setCrumbs([...crumbs, { label: b.label, from: b.start, to: b.end, zoom: finer(here.zoom) }])
         }
@@ -212,16 +231,33 @@ export function Results({ device, summary, onRescan }: Props) {
         <>
           <p className="muted small-text list-head">
             {count(result.total, "item")}
-            {result.undated > 0 && here.from === null && ` · ${result.undated.toLocaleString()} without a date, shown last`}
+            {result.deleted > 0 && (
+              <>
+                {" · "}
+                <span className="deleted-text">{result.deleted.toLocaleString()} deleted</span>
+              </>
+            )}
+            {result.corrupt > 0 && (
+              <>
+                {" · "}
+                <span className="damaged-text">{result.corrupt.toLocaleString()} damaged</span>
+              </>
+            )}
+            {result.undated > 0 &&
+              here.from === null &&
+              ` · ${result.undated.toLocaleString()} without a date, shown last`}
           </p>
           {result.total === 0 ? (
-            <div className="empty">
-              <p>Nothing deleted or damaged matches.</p>
-            </div>
+            <div className="empty">Nothing deleted or damaged matches.</div>
           ) : (
             <div className="grid">
               {result.items.map((f) => (
-                <FindingCard key={f.id} finding={f} onOpen={() => setOpen(f)} />
+                <FindingCard
+                  key={f.id}
+                  finding={f}
+                  selected={open?.id === f.id}
+                  onOpen={() => setOpen(f)}
+                />
               ))}
             </div>
           )}
@@ -243,3 +279,15 @@ export function Results({ device, summary, onRescan }: Props) {
     </div>
   );
 }
+
+const ALL_QUERY: Query = {
+  text: "",
+  app: null,
+  status: null,
+  media: null,
+  zoom: "year",
+  from: null,
+  to: null,
+  tzOffsetMinutes: 0,
+  limit: PAGE,
+};
