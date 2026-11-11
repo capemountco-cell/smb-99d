@@ -1251,6 +1251,7 @@ button.link {
   font-size: 13px;
   line-height: 1.4;
   color: var(--text);
+  white-space: pre-line;
   display: -webkit-box;
   -webkit-line-clamp: 5;
   -webkit-box-orient: vertical;
@@ -1298,7 +1299,7 @@ button.link {
 }
 
 .detail {
-  width: min(400px, 100%);
+  width: min(480px, 100%);
   height: 100%;
   overflow-y: auto;
   display: flex;
@@ -1321,32 +1322,111 @@ button.link {
   word-break: break-all;
 }
 
-.detail-preview {
-  min-height: 170px;
-  display: grid;
-  place-items: center;
+.viewer {
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
   overflow: hidden;
   border-radius: 14px;
+  border: 1px solid var(--line);
   background: var(--raised);
   color: var(--faint);
+  text-align: center;
 }
 
-.detail-preview img {
+.viewer.media {
+  padding: 0;
+  background: #000;
+}
+
+.viewer.media img,
+.viewer.media video {
+  display: block;
   max-width: 100%;
-  max-height: 360px;
+  max-height: 420px;
+}
+
+.viewer.media video {
+  width: 100%;
+}
+
+.viewer.audio audio {
+  width: 100%;
+}
+
+.viewer.document {
+  padding: 0;
+  height: 460px;
+  background: #ffffff;
+}
+
+.viewer.document iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.viewer.loading {
+  animation: breathe 1.2s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Deleted items sit in a red frame, damaged ones in violet. */
+.viewer.deleted {
+  border-color: rgba(255, 90, 78, 0.35);
+}
+
+.viewer.corrupt {
+  border-color: rgba(182, 156, 255, 0.35);
+}
+
+.text-view {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .recovered {
   margin: 0;
+  max-height: 460px;
+  overflow: auto;
   padding: 16px;
   border-radius: 14px;
   border: 1px solid rgba(255, 90, 78, 0.35);
   background: rgba(255, 90, 78, 0.07);
   font-family: inherit;
-  font-size: 17px;
-  line-height: 1.45;
+  font-size: 15px;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.recovered.corrupt {
+  border-color: rgba(182, 156, 255, 0.35);
+  background: rgba(182, 156, 255, 0.06);
+}
+
+.play-mark {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--text);
+  background: rgba(10, 10, 11, 0.6);
+  backdrop-filter: blur(6px);
 }
 
 .facts {

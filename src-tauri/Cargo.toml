@@ -17,7 +17,8 @@ tauri-build = { version = "2", features = [] }
 banker-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tauri = { version = "2", features = [] }
+# protocol-asset: previews read the exact files the user opens (see `preview`).
+tauri = { version = "2", features = ["protocol-asset"] }
 
 [features]
 # Turned on by `tauri build`. Serves the bundled frontend instead of devUrl.

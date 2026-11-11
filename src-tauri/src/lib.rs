@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use banker_core::devices::{Device, Discovery};
 use banker_core::export::Exported;
+use banker_core::preview::{CardPreview, Preview};
 use banker_core::scan::Progress;
 use banker_core::timeline::{Query, QueryResult};
 use banker_core::Report;
@@ -118,18 +119,41 @@ fn query(session: State<'_, Session>, query: Query) -> Result<QueryResult, Strin
     Ok(banker_core::timeline::query(findings, &query))
 }
 
+/// The finding with this id in the current report.
+fn finding(session: &Session, id: u64) -> Result<Option<banker_core::Finding>, String> {
+    let report = session.report.lock().map_err(|e| e.to_string())?;
+    Ok(report.as_ref().and_then(|r| r.finding(id)).cloned())
+}
+
 #[tauri::command]
-async fn thumbnail(
+async fn card_preview(
     app: AppHandle,
     session: State<'_, Session>,
     id: u64,
-) -> Result<Option<String>, String> {
+) -> Result<CardPreview, String> {
     let cache = work_dir(&app)?.join("thumbnails");
-    let finding = {
-        let report = session.report.lock().map_err(|e| e.to_string())?;
-        report.as_ref().and_then(|r| r.finding(id)).cloned()
-    };
-    blocking(move || Ok(finding.and_then(|f| banker_core::export::thumbnail(&f, &cache)))).await
+    let finding = finding(&session, id)?;
+    blocking(move || {
+        Ok(finding
+            .map(|f| banker_core::preview::card_preview(&f, &cache))
+            .unwrap_or_default())
+    })
+    .await
+}
+
+/// The full preview. When it shows a file directly (a picture, a player, a
+/// PDF), only that one file is opened to the window's asset protocol.
+#[tauri::command]
+async fn preview(app: AppHandle, session: State<'_, Session>, id: u64) -> Result<Preview, String> {
+    let cache = work_dir(&app)?.join("thumbnails");
+    let finding = finding(&session, id)?.ok_or("That item is no longer in the results.")?;
+    let shown = blocking(move || Ok(banker_core::preview::preview(&finding, &cache))).await?;
+    if let Some(file) = shown.file() {
+        app.asset_protocol_scope()
+            .allow_file(file)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(shown)
 }
 
 #[tauri::command]
@@ -158,7 +182,8 @@ pub fn run() {
             scan,
             cancel_scan,
             query,
-            thumbnail,
+            card_preview,
+            preview,
             export,
             reveal
         ])

@@ -14,6 +14,7 @@ pub mod integrity;
 pub mod ios;
 pub mod model;
 pub mod paths;
+pub mod preview;
 pub mod scan;
 pub mod sqlite;
 pub mod timeline;

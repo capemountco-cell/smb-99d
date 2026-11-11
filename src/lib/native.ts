@@ -4,7 +4,7 @@
  * The types mirror the serde shapes in crates/banker-core.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type Status = "deleted" | "corrupt";
@@ -116,6 +116,22 @@ export interface QueryResult {
   bySource: Partial<Record<Source, number>>;
 }
 
+export interface CardPreview {
+  /** A small picture, as a data URL. */
+  image: string | null;
+  /** The opening lines, for text. */
+  text: string | null;
+}
+
+export type Preview =
+  | { kind: "image"; path: string }
+  | { kind: "video"; path: string }
+  | { kind: "audio"; path: string }
+  | { kind: "pdf"; path: string }
+  | { kind: "text"; text: string; truncated: boolean }
+  | { kind: "picture"; dataUrl: string }
+  | { kind: "nothing"; reason: string };
+
 export interface Exported {
   folder: string;
   files: number;
@@ -143,7 +159,11 @@ export const scan = (device: Device) =>
   call<ScanSummary>("scan", { device, tzOffsetMinutes: localOffsetMinutes() });
 export const cancelScan = () => call<void>("cancel_scan");
 export const query = (q: Query) => call<QueryResult>("query", { query: q });
-export const thumbnail = (id: number) => call<string | null>("thumbnail", { id });
+export const cardPreview = (id: number) => call<CardPreview>("card_preview", { id });
+export const preview = (id: number) => call<Preview>("preview", { id });
+
+/** A URL the window can load a previewed file from. */
+export const fileUrl = (path: string) => convertFileSrc(path);
 export const exportMatching = (q: Query) => call<Exported>("export", { query: q });
 export const reveal = (path: string) => call<void>("reveal", { path });
 

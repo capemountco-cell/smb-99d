@@ -1,43 +1,60 @@
 import { useEffect, useRef, useState } from "react";
 
 import { MEDIA_ICON, SOURCE_LABEL, bytes, when } from "../lib/format";
-import { reveal, thumbnail, type Finding } from "../lib/native";
+import {
+  cardPreview,
+  fileUrl,
+  preview,
+  reveal,
+  type CardPreview,
+  type Finding,
+  type Preview,
+} from "../lib/native";
 import { Icon } from "./Icon";
 
-const thumbs = new Map<number, string | null>();
+const cards = new Map<number, CardPreview>();
 
-/** Loads a thumbnail once the element scrolls into view, and remembers it. */
-function useThumbnail(finding: Finding) {
+/**
+ * A card's preview (a small picture or the opening lines), loaded once the
+ * card scrolls into view and remembered. Recovered records already carry
+ * their text, so they need no round trip.
+ */
+function useCardPreview(f: Finding) {
   const ref = useRef<HTMLDivElement>(null);
-  const [url, setUrl] = useState<string | null>(thumbs.get(finding.id) ?? null);
-  const wants = finding.path !== null && ["image", "video", "document"].includes(finding.media);
+  const known = f.text ? { image: null, text: f.text } : cards.get(f.id);
+  const [shown, setShown] = useState<CardPreview | null>(known ?? null);
+  const wants = !known && f.path !== null;
 
   useEffect(() => {
-    if (!wants || thumbs.has(finding.id) || !ref.current) return;
+    if (!wants || !ref.current) return;
     const el = ref.current;
     const seen = new IntersectionObserver(([entry]) => {
       if (!entry?.isIntersecting) return;
       seen.disconnect();
-      thumbnail(finding.id)
-        .then((u) => {
-          thumbs.set(finding.id, u);
-          setUrl(u);
+      cardPreview(f.id)
+        .then((p) => {
+          cards.set(f.id, p);
+          setShown(p);
         })
-        .catch(() => thumbs.set(finding.id, null));
+        .catch(() => cards.set(f.id, { image: null, text: null }));
     });
     seen.observe(el);
     return () => seen.disconnect();
-  }, [finding.id, wants]);
+  }, [f.id, wants]);
 
-  return { ref, url };
+  return { ref, shown };
 }
 
-/** A picture of the finding, or its kind's icon when there is none. */
+/** A small square picture of a finding, for the overview mosaic. */
 export function Thumb({ finding: f, className }: { finding: Finding; className: string }) {
-  const { ref, url } = useThumbnail(f);
+  const { ref, shown } = useCardPreview(f);
   return (
     <div className={`${className} ${f.status}`} ref={ref}>
-      {url ? <img src={url} alt="" /> : <Icon name={MEDIA_ICON[f.media]} size={26} stroke={1.5} />}
+      {shown?.image ? (
+        <img src={shown.image} alt="" />
+      ) : (
+        <Icon name={MEDIA_ICON[f.media]} size={26} stroke={1.5} />
+      )}
     </div>
   );
 }
@@ -51,17 +68,22 @@ export function FindingCard({
   selected: boolean;
   onOpen: () => void;
 }) {
-  const { ref, url } = useThumbnail(f);
+  const { ref, shown } = useCardPreview(f);
   return (
     <button type="button" className={`card ${f.status} ${selected ? "selected" : ""}`} onClick={onOpen}>
       <div className="thumb" ref={ref}>
-        {url ? (
-          <img src={url} alt="" />
-        ) : f.text ? (
-          <p className="snippet">{f.text}</p>
+        {shown?.image ? (
+          <img src={shown.image} alt="" />
+        ) : shown?.text ? (
+          <p className="snippet">{shown.text}</p>
         ) : (
           <span className="thumb-icon">
             <Icon name={MEDIA_ICON[f.media]} size={30} stroke={1.4} />
+          </span>
+        )}
+        {f.media === "video" && shown?.image && (
+          <span className="play-mark" aria-hidden>
+            <Icon name="play" size={16} stroke={2} />
           </span>
         )}
         <span className={`tag ${f.status === "corrupt" ? "damaged" : "deleted"} on-thumb`}>
@@ -76,6 +98,99 @@ export function FindingCard({
   );
 }
 
+/** The item itself: the picture, a player, the document, or its text. */
+function Viewer({ finding: f }: { finding: Finding }) {
+  const [shown, setShown] = useState<Preview | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    setShown(null);
+    setFailed(false);
+    preview(f.id)
+      .then((p) => live && setShown(p))
+      .catch((e) => live && setShown({ kind: "nothing", reason: String(e) }));
+    return () => {
+      live = false;
+    };
+  }, [f.id]);
+
+  if (!shown) {
+    return (
+      <div className={`viewer ${f.status} loading`}>
+        <Icon name={MEDIA_ICON[f.media]} size={40} stroke={1.3} />
+      </div>
+    );
+  }
+
+  const cannot = (what: string) => (
+    <div className={`viewer ${f.status}`}>
+      <Icon name={MEDIA_ICON[f.media]} size={40} stroke={1.3} />
+      <p className="muted small-text">
+        This Mac cannot {what} this file
+        {f.status === "corrupt" ? ", probably because of the damage" : ""}. Save it to the Mac to
+        try another app.
+      </p>
+    </div>
+  );
+
+  switch (shown.kind) {
+    case "image":
+      return failed ? (
+        cannot("show")
+      ) : (
+        <div className={`viewer ${f.status} media`}>
+          <img src={fileUrl(shown.path)} alt={f.name} onError={() => setFailed(true)} />
+        </div>
+      );
+    case "picture":
+      return (
+        <div className={`viewer ${f.status} media`}>
+          <img src={shown.dataUrl} alt={f.name} />
+        </div>
+      );
+    case "video":
+      return failed ? (
+        cannot("play")
+      ) : (
+        <div className={`viewer ${f.status} media`}>
+          <video src={fileUrl(shown.path)} controls preload="metadata" onError={() => setFailed(true)} />
+        </div>
+      );
+    case "audio":
+      return failed ? (
+        cannot("play")
+      ) : (
+        <div className={`viewer ${f.status} audio`}>
+          <Icon name="audio" size={40} stroke={1.3} />
+          <audio src={fileUrl(shown.path)} controls preload="metadata" onError={() => setFailed(true)} />
+        </div>
+      );
+    case "pdf":
+      return (
+        <div className={`viewer ${f.status} document`}>
+          <iframe src={fileUrl(shown.path)} title={f.name} />
+        </div>
+      );
+    case "text":
+      return (
+        <div className="text-view">
+          <pre className={`recovered ${f.status} selectable`}>{shown.text}</pre>
+          {shown.truncated && (
+            <p className="muted small-text">Showing the first 64 KB. Save it to the Mac to read it all.</p>
+          )}
+        </div>
+      );
+    case "nothing":
+      return (
+        <div className={`viewer ${f.status}`}>
+          <Icon name={MEDIA_ICON[f.media]} size={40} stroke={1.3} />
+          <p className="muted small-text">{shown.reason}</p>
+        </div>
+      );
+  }
+}
+
 export function Detail({
   finding: f,
   appName,
@@ -85,7 +200,6 @@ export function Detail({
   appName: string | null;
   onClose: () => void;
 }) {
-  const { ref, url } = useThumbnail(f);
   const damaged = f.status === "corrupt";
 
   useEffect(() => {
@@ -112,12 +226,7 @@ export function Detail({
           </button>
         </header>
         <h2 className="selectable detail-title">{f.name}</h2>
-        {(url || !f.text) && (
-          <div className={`detail-preview ${f.status}`} ref={ref}>
-            {url ? <img src={url} alt="" /> : <Icon name={MEDIA_ICON[f.media]} size={44} stroke={1.3} />}
-          </div>
-        )}
-        {f.text && <pre className="recovered selectable">{f.text}</pre>}
+        <Viewer finding={f} />
         <dl className="facts">
           <dt>Why it is shown</dt>
           <dd className="selectable">{f.reason}</dd>
