@@ -473,6 +473,7 @@ pub fn scan_device(
     } else {
         copy_to_mac(device, Path::new(""), cancel)?
     };
+    let (folder, warning) = folder;
     let mut scanner = Scanner {
         now,
         out: work.join("recovered"),
@@ -480,6 +481,9 @@ pub fn scan_device(
         progress,
     };
     let mut report = scanner.scan(&folder);
+    if let Some(w) = warning {
+        report.note(w);
+    }
     if copies {
         report.note(format!(
             "A copy of the phone was saved in {}.",
@@ -555,6 +559,88 @@ mod tests {
             .as_deref()
             .is_some_and(|t| t.contains("kept message"))));
         assert_eq!(report.databases_checked, 1);
+    }
+
+    /// The folder `adb pull -a /sdcard/ <dest>` leaves behind.
+    #[test]
+    fn scans_an_android_copy() {
+        let dest = temp_dir("android");
+        let sd = dest.join("sdcard");
+        let j = tiny_jpeg();
+        let files: &[(&str, &[u8])] = &[
+            ("DCIM/Camera/IMG_20250301_101500.jpg", &j),
+            (
+                "DCIM/Camera/.trashed-1745000000-IMG_20250302_120000.jpg",
+                &j,
+            ),
+            (
+                "Download/.trashed-1745100000-boarding pass.pdf",
+                b"%PDF-1.4\n%%EOF",
+            ),
+            (
+                "Android/.Trash/com.sec.android.gallery3d/1700000000000/IMG_1.jpg",
+                &j,
+            ),
+            (
+                "Android/data/com.sec.android.gallery3d/files/.Trash/IMG_2.jpg",
+                &j,
+            ),
+            (
+                "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images/IMG-WA0001.jpg",
+                &j[..j.len() - 3],
+            ),
+            ("LOST.DIR/1234", b"leftover"),
+        ];
+        for (rel, data) in files {
+            let path = sd.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, data).unwrap();
+        }
+        let db = sd.join("Android/data/com.example.notes/files/notes.db");
+        fs::create_dir_all(db.parent().unwrap()).unwrap();
+        fs::write(&db, tiny_db()).unwrap();
+        fs::write(dest.join("banker-copy-log.txt"), "pulled").unwrap();
+
+        let report = run(&dest);
+        let find = |name: &str| {
+            report
+                .findings
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap_or_else(|| panic!("{name} missing: {:?}", report.findings))
+        };
+
+        let trashed = find("IMG_20250302_120000.jpg");
+        assert_eq!(trashed.status, Status::Deleted);
+        assert_eq!(trashed.app.as_deref(), Some("Camera"));
+        assert_eq!(trashed.time, Some(1_745_000_000 - 30 * 86_400));
+        assert_eq!(find("boarding pass.pdf").status, Status::Deleted);
+        assert_eq!(
+            find("IMG_1.jpg").app.as_deref(),
+            Some("com.sec.android.gallery3d")
+        );
+        assert_eq!(
+            find("IMG_2.jpg").app.as_deref(),
+            Some("com.sec.android.gallery3d")
+        );
+        let broken = find("IMG-WA0001.jpg");
+        assert_eq!(broken.status, Status::Corrupt);
+        assert_eq!(broken.app.as_deref(), Some("com.whatsapp"));
+        assert_eq!(find("1234").status, Status::Deleted);
+        let note = report
+            .findings
+            .iter()
+            .find(|f| f.text.as_deref() == Some("secret plans for friday"))
+            .expect("deleted row in an app database");
+        assert_eq!(note.app.as_deref(), Some("com.example.notes"));
+
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.name == "IMG_20250301_101500.jpg" || f.name.contains("banker-copy-log")),
+            "live files are never listed"
+        );
     }
 
     #[test]

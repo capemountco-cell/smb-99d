@@ -136,13 +136,11 @@ export function Sidebar(props: Props) {
 
       {!compact && discovery.hints.length > 0 && (
         <section className="hints">
-          <h2>To see more devices</h2>
+          <h2>Not seeing a device?</h2>
           {discovery.hints.map((h) => (
-            <div key={h.tool} className="hint">
-              <p className="small-text muted">
-                Install {h.tool} {h.why}:
-              </p>
-              <code className="selectable">{h.install}</code>
+            <div key={h.text} className="hint">
+              <p className="small-text muted">{h.text}</p>
+              {h.command && <code className="selectable">{h.command}</code>}
             </div>
           ))}
         </section>

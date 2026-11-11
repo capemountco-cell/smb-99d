@@ -46,9 +46,10 @@ pub struct Device {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolHint {
-    pub tool: String,
-    pub why: String,
-    pub install: String,
+    /// What to do, as one sentence.
+    pub text: String,
+    /// A Terminal command that does it, when there is one.
+    pub command: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -194,9 +195,8 @@ pub fn discover(home: &Path) -> Discovery {
             }
         }
         None => d.hints.push(ToolHint {
-            tool: "libimobiledevice".into(),
-            why: "to back up iPhones and iPads over USB".into(),
-            install: "brew install libimobiledevice".into(),
+            text: "To back up iPhones and iPads over USB, install libimobiledevice:".into(),
+            command: Some("brew install libimobiledevice".into()),
         }),
     }
 
@@ -224,11 +224,16 @@ pub fn discover(home: &Path) -> Discovery {
                     problem,
                 });
             }
+            if !d.devices.iter().any(|x| x.kind == DeviceKind::Android) {
+                d.hints.push(ToolHint {
+                    text: "Android phone plugged in but not listed? Turn on USB debugging: Settings > About phone, tap Build number 7 times, then Settings > System > Developer options > USB debugging. Then tap Allow on the phone.".into(),
+                    command: None,
+                });
+            }
         }
         None => d.hints.push(ToolHint {
-            tool: "Android platform tools".into(),
-            why: "to copy Android phones over USB (also turn on USB debugging on the phone)".into(),
-            install: "brew install android-platform-tools".into(),
+            text: "To copy Android phones over USB, install Android platform tools, then turn on USB debugging on the phone:".into(),
+            command: Some("brew install android-platform-tools".into()),
         }),
     }
 
@@ -298,26 +303,62 @@ fn run(tool: &Path, args: &[&str], dest: &Path, cancel: &AtomicBool) -> Result<S
     }
 }
 
-/// Copy a phone to `dest` and return the folder to scan. Drives, backups
-/// and folders are scanned where they are.
-pub fn copy_to_mac(device: &Device, dest: &Path, cancel: &AtomicBool) -> Result<PathBuf, String> {
+/// The outcome of `adb pull`. On a real phone it nearly always exits with an
+/// error because a few protected files cannot be read, even when everything
+/// else copied. A copy with anything in it is kept and scanned, with a note;
+/// only a copy that got nothing at all (or was stopped) is a failure.
+pub fn android_pull_outcome(
+    pulled: Result<String, String>,
+    dest: &Path,
+) -> Result<Option<String>, String> {
+    let error = match pulled {
+        Ok(_) => return Ok(None),
+        Err(e) => e,
+    };
+    if error == "Stopped." {
+        return Err(error);
+    }
+    let copied = std::fs::read_dir(dest.join("sdcard"))
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false);
+    if copied {
+        Ok(Some(
+            "Some files on the phone could not be copied (Android protects them). Everything else was copied and scanned.".into(),
+        ))
+    } else {
+        Err(format!(
+            "Copying from the phone failed: {error} Unlock the phone, keep it unlocked, and check that USB debugging is still allowed."
+        ))
+    }
+}
+
+/// Copy a phone to `dest` and return the folder to scan, with a note when
+/// part of the copy failed. Drives, backups and folders are scanned where
+/// they are.
+pub fn copy_to_mac(
+    device: &Device,
+    dest: &Path,
+    cancel: &AtomicBool,
+) -> Result<(PathBuf, Option<String>), String> {
     match device.kind {
         DeviceKind::Drive | DeviceKind::Backup | DeviceKind::Folder => device
             .path
             .as_ref()
-            .map(PathBuf::from)
+            .map(|p| (PathBuf::from(p), None))
             .ok_or_else(|| "This device has no folder to scan.".into()),
         DeviceKind::Android => {
             let adb = find_tool("adb").ok_or("Install Android platform tools first.")?;
             let target = dest.display().to_string();
-            run(
+            // Pulls into <dest>/sdcard, keeping each file's original dates
+            // (-a) so the timeline shows when things happened on the phone.
+            let pulled = run(
                 &adb,
                 &["-s", &device.id, "pull", "-a", "/sdcard/", &target],
                 dest,
                 cancel,
-            )
-            .map_err(|e| format!("Copying from the phone failed: {e}"))?;
-            Ok(dest.to_path_buf())
+            );
+            let warning = android_pull_outcome(pulled, dest)?;
+            Ok((dest.to_path_buf(), warning))
         }
         DeviceKind::Iphone => {
             let pair = find_tool("idevicepair").ok_or("Install libimobiledevice first.")?;
@@ -340,7 +381,7 @@ pub fn copy_to_mac(device: &Device, dest: &Path, cancel: &AtomicBool) -> Result<
                 cancel,
             )
             .map_err(|e| format!("Backing up the iPhone failed: {e}"))?;
-            Ok(dest.join(&device.id))
+            Ok((dest.join(&device.id), None))
         }
     }
 }
@@ -392,6 +433,18 @@ mod tests {
         std::os::unix::fs::symlink("/", dir.join("Macintosh HD")).unwrap();
         let names: Vec<_> = drives(&dir).into_iter().map(|d| d.name).collect();
         assert_eq!(names, vec!["USB STICK"]);
+    }
+
+    #[test]
+    fn a_partial_android_copy_is_kept_and_an_empty_one_fails() {
+        let dir = temp_dir("pull");
+        assert_eq!(android_pull_outcome(Ok(String::new()), &dir), Ok(None));
+        assert!(android_pull_outcome(Err("adb: error: failed to stat".into()), &dir).is_err());
+        assert!(android_pull_outcome(Err("Stopped.".into()), &dir).is_err());
+        std::fs::create_dir_all(dir.join("sdcard/DCIM")).unwrap();
+        let kept = android_pull_outcome(Err("adb: error: Permission denied".into()), &dir);
+        assert!(kept.unwrap().unwrap().contains("could not be copied"));
+        assert!(android_pull_outcome(Err("Stopped.".into()), &dir).is_err());
     }
 
     #[test]

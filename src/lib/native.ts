@@ -53,9 +53,8 @@ export interface Device {
 }
 
 export interface ToolHint {
-  tool: string;
-  why: string;
-  install: string;
+  text: string;
+  command: string | null;
 }
 
 export interface Discovery {

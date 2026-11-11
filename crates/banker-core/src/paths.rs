@@ -112,7 +112,10 @@ pub fn app_for_path(path: &str) -> Option<String> {
         let after = dirs.get(i + 2).copied();
         match (*d, next, after) {
             // Android: Android/data/<package>, Android/media/<package>
-            ("Android", Some("data" | "media" | "obb"), Some(pkg)) if pkg.contains('.') => {
+            // Samsung (Android 11+) keeps its bins in Android/.Trash/<package>.
+            ("Android", Some("data" | "media" | "obb" | ".Trash"), Some(pkg))
+                if pkg.contains('.') =>
+            {
                 return Some(pkg.to_string())
             }
             // macOS: ~/Library/Containers/<bundle id>
