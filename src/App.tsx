@@ -1,56 +1,119 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { greet, nativeAvailable } from "./lib/native";
+import { Results } from "./components/Results";
+import { ScanPanel } from "./components/ScanPanel";
+import { Sidebar } from "./components/Sidebar";
+import {
+  cancelScan,
+  discover,
+  nativeAvailable,
+  onProgress,
+  scan,
+  type Device,
+  type Discovery,
+  type Progress,
+  type ScanSummary,
+} from "./lib/native";
+
+type Stage =
+  | { kind: "idle" }
+  | { kind: "scanning"; progress: Progress | null }
+  | { kind: "done"; summary: ScanSummary }
+  | { kind: "failed"; message: string };
+
+const message = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
 /**
- * The starting screen. Replace it.
- *
- * It exists to prove the whole chain works on a new machine: React renders,
- * the button calls a Rust command, and Rust answers from the core crate.
+ * Pick a device on the left, press Scan, and see only what was deleted or
+ * damaged on it, laid out on a timeline.
  */
 export function App() {
-  const [name, setName] = useState("");
-  const [reply, setReply] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [discovery, setDiscovery] = useState<Discovery>({ devices: [], hints: [] });
+  const [looking, setLooking] = useState(false);
+  const [selected, setSelected] = useState<Device | null>(null);
+  const [stage, setStage] = useState<Stage>({ kind: "idle" });
+  const [scanned, setScanned] = useState<Device | null>(null);
 
-  const ask = async () => {
-    setError(null);
+  const refresh = useCallback(async () => {
+    if (!nativeAvailable()) return;
+    setLooking(true);
     try {
-      setReply(await greet(name));
+      setDiscovery(await discover());
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setStage({ kind: "failed", message: message(cause) });
+    } finally {
+      setLooking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    // Devices come and go; look again every few seconds while idle.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  useEffect(() => {
+    const stop = onProgress((progress) =>
+      setStage((s) => (s.kind === "scanning" ? { kind: "scanning", progress } : s)),
+    );
+    return () => {
+      void stop.then((f) => f());
+    };
+  }, []);
+
+  const start = async (device: Device) => {
+    setSelected(device);
+    setStage({ kind: "scanning", progress: null });
+    try {
+      const summary = await scan(device);
+      setScanned(device);
+      setStage({ kind: "done", summary });
+    } catch (cause) {
+      setStage({ kind: "failed", message: message(cause) });
     }
   };
 
+  const busy = stage.kind === "scanning";
+  const showResults = stage.kind === "done" && scanned !== null && scanned.id === selected?.id;
+
   return (
-    <main className="app">
-      <h1>Banker</h1>
-      <p className="muted">
-        {nativeAvailable()
-          ? "Running inside the native window."
-          : "Running in a browser tab. Start the app with npm run dev to reach Rust."}
-      </p>
-      <form
-        className="row"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void ask();
+    <div className="shell">
+      <Sidebar
+        discovery={discovery}
+        looking={looking}
+        selected={selected}
+        disabled={busy}
+        onSelect={(d) => {
+          setSelected(d);
+          if (stage.kind === "failed") setStage({ kind: "idle" });
         }}
-      >
-        <label className="visually-hidden" htmlFor="name">
-          Your name
-        </label>
-        <input
-          id="name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Your name"
-          autoComplete="off"
-        />
-        <button type="submit">Say hello</button>
-      </form>
-      {reply && <p>{reply}</p>}
-      {error && <p className="error">{error}</p>}
-    </main>
+        onRefresh={() => void refresh()}
+      />
+      <main className="main">
+        {!nativeAvailable() && (
+          <p className="banner">
+            Running in a browser tab. Start the app with <code>npm run dev</code> to reach
+            devices.
+          </p>
+        )}
+        {showResults && stage.kind === "done" ? (
+          <Results
+            device={scanned}
+            summary={stage.summary}
+            onRescan={() => void start(scanned)}
+          />
+        ) : (
+          <ScanPanel
+            device={selected}
+            stage={stage}
+            onScan={(d) => void start(d)}
+            onCancel={() => void cancelScan()}
+          />
+        )}
+      </main>
+    </div>
   );
 }

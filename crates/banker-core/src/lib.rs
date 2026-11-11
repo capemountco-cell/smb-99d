@@ -1,33 +1,22 @@
-//! The app's logic.
+//! Banker's logic: find what was deleted or damaged on a device.
 //!
 //! Everything that makes a decision lives here, not in the Tauri crate and not
 //! in React. This crate does not depend on Tauri, so it builds and its tests
 //! run on Linux in CI, without a window, a webview or a Mac.
+//!
+//! Banker only ever surfaces deleted or damaged content. Healthy, live files
+//! and rows are read only to tell them apart, and are never reported.
 
-/// Build the greeting shown by the starter screen.
-///
-/// Blank input gets a neutral greeting rather than "Hello, !".
-pub fn greeting(name: &str) -> String {
-    let name = name.trim();
-    if name.is_empty() {
-        "Hello from Rust.".to_string()
-    } else {
-        format!("Hello, {name}. This came from Rust.")
-    }
-}
+pub mod carve;
+pub mod devices;
+pub mod export;
+pub mod integrity;
+pub mod ios;
+pub mod model;
+pub mod paths;
+pub mod scan;
+pub mod sqlite;
+pub mod timeline;
+mod util;
 
-#[cfg(test)]
-mod tests {
-    use super::greeting;
-
-    #[test]
-    fn greets_by_name() {
-        assert_eq!(greeting("Ada"), "Hello, Ada. This came from Rust.");
-    }
-
-    #[test]
-    fn trims_and_handles_blank_input() {
-        assert_eq!(greeting("  Ada "), "Hello, Ada. This came from Rust.");
-        assert_eq!(greeting("   "), "Hello from Rust.");
-    }
-}
+pub use model::{Finding, Media, Report, Source, Status};

@@ -7,3 +7,6 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+# Findings cross the IPC boundary as JSON, so the types derive Serialize here
+# rather than being mirrored by hand in the Tauri crate.
+serde = { workspace = true }
