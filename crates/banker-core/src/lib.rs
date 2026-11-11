@@ -19,6 +19,7 @@ pub mod preview;
 pub mod scan;
 pub mod sqlite;
 pub mod timeline;
+pub mod transfer;
 mod util;
 
 pub use model::{Finding, Media, Report, Source, Status};

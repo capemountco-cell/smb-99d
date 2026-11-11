@@ -337,6 +337,18 @@ fn entry(folder: &Path, info: CloneInfo) -> CloneEntry {
     }
 }
 
+/// A folder the window names, checked to be a clone directly inside
+/// `~/Banker Backups`, so no other folder can be read through it.
+pub fn clone_folder(home: &Path, folder: &str) -> Result<PathBuf, String> {
+    let not = || format!("{folder} is not a Banker clone.");
+    let root = fs::canonicalize(home.join("Banker Backups")).map_err(|_| not())?;
+    let folder = fs::canonicalize(folder).map_err(|_| not())?;
+    if folder.parent() != Some(root.as_path()) || !folder.join(INFO_FILE).is_file() {
+        return Err(not());
+    }
+    Ok(folder)
+}
+
 /// Every clone in `~/Banker Backups`, newest first.
 pub fn list_clones(home: &Path) -> Vec<CloneEntry> {
     let Ok(dirs) = fs::read_dir(home.join("Banker Backups")) else {
@@ -806,6 +818,21 @@ mod tests {
             "encrypted clones cannot be scanned"
         );
         assert!(list[1].scan_path.as_deref().unwrap().ends_with(BACKUP_DIR));
+    }
+
+    #[test]
+    fn only_clones_inside_banker_backups_are_accepted() {
+        let home = temp_dir("clone-folder");
+        let good = home.join("Banker Backups/Phone clone");
+        fs::create_dir_all(&good).unwrap();
+        fs::write(good.join(INFO_FILE), "{}").unwrap();
+        let elsewhere = home.join("Elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::write(elsewhere.join(INFO_FILE), "{}").unwrap();
+        assert!(clone_folder(&home, &good.display().to_string()).is_ok());
+        assert!(clone_folder(&home, &elsewhere.display().to_string()).is_err());
+        let sneaky = format!("{}/../../Elsewhere", good.display());
+        assert!(clone_folder(&home, &sneaky).is_err());
     }
 
     #[test]

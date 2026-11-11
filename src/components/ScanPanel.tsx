@@ -1,5 +1,5 @@
 import { DEVICE_ICON, count } from "../lib/format";
-import type { CloneEntry, Device, Progress } from "../lib/native";
+import type { CloneEntry, Device, Progress, Transferred } from "../lib/native";
 import { Icon, type IconName } from "./Icon";
 
 export type Stage =
@@ -9,9 +9,13 @@ export type Stage =
   | { kind: "restoring"; device: Device; progress: Progress | null }
   | { kind: "cloned"; device: Device; clone: CloneEntry }
   | { kind: "restored"; device: Device; message: string }
+  | { kind: "awaiting"; clone: CloneEntry }
+  | { kind: "choosing"; device: Device; clone: CloneEntry }
+  | { kind: "transferring"; device: Device; progress: Progress | null }
+  | { kind: "transferred"; device: Device; result: Transferred }
   | { kind: "failed"; message: string };
 
-export type Working = Extract<Stage, { kind: "scanning" | "cloning" | "restoring" }>;
+export type Working = Extract<Stage, { kind: "scanning" | "cloning" | "restoring" | "transferring" }>;
 
 interface Props {
   device: Device | null;
@@ -49,6 +53,10 @@ function steps(stage: Working): Step[] {
     const at = /zip/i.test(phase) ? 3 : /organis/i.test(phase) ? 2 : /clon|copy/i.test(phase) ? 1 : 0;
     return mark(labels, at);
   }
+  if (stage.kind === "transferring") {
+    const at = /gallery/i.test(phase) ? 2 : /send/i.test(phase) ? 1 : 0;
+    return mark(["Prepare", "Send to the phone", "Add to the Gallery"], at);
+  }
   if (stage.kind === "restoring") {
     return mark(["Prepare the clone", "Restore"], /restor|copying the files/i.test(phase) ? 1 : 0);
   }
@@ -63,6 +71,7 @@ const VERB: Record<Working["kind"], string> = {
   scanning: "Reading",
   cloning: "Cloning",
   restoring: "Restoring",
+  transferring: "Transferring to",
 };
 
 /** Amber: Banker is working. A percentage fills the ring when it is known. */
@@ -132,7 +141,12 @@ export function WorkingView({ stage, onCancel }: { stage: Working; onCancel: () 
 }
 
 export function ScanPanel({ device, stage, onScan, onClone, onRestore, onCancel }: Props) {
-  if (stage.kind === "scanning" || stage.kind === "cloning" || stage.kind === "restoring") {
+  if (
+    stage.kind === "scanning" ||
+    stage.kind === "cloning" ||
+    stage.kind === "restoring" ||
+    stage.kind === "transferring"
+  ) {
     return <WorkingView stage={stage} onCancel={onCancel} />;
   }
 

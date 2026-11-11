@@ -283,10 +283,12 @@ export function RestoreSheet({
 export function CloneDone({
   clone,
   onScan,
+  onTransfer,
   onBack,
 }: {
   clone: CloneEntry;
   onScan: (path: string) => void;
+  onTransfer: () => void;
   onBack: () => void;
 }) {
   const i = clone.info;
@@ -322,7 +324,10 @@ export function CloneDone({
         </p>
       ))}
       <div className="row center-row">
-        <button type="button" className="primary" onClick={() => void reveal(clone.folder)}>
+        <button type="button" className="primary" onClick={onTransfer}>
+          Transfer to another phone
+        </button>
+        <button type="button" className="ghost" onClick={() => void reveal(clone.folder)}>
           Show in Finder
         </button>
         {clone.scanPath && (
@@ -339,14 +344,22 @@ export function CloneDone({
   );
 }
 
-export function RestoreDone({ message, onBack }: { message: string; onBack: () => void }) {
+export function RestoreDone({
+  message,
+  title = "Restore sent to the phone",
+  onBack,
+}: {
+  message: string;
+  title?: string;
+  onBack: () => void;
+}) {
   return (
     <div className="hero">
       <span className="state-pill saved">
         <Icon name="check" size={14} stroke={2.4} />
-        Restored
+        Done
       </span>
-      <h1 className="display">Restore sent to the phone</h1>
+      <h1 className="display">{title}</h1>
       <p className="lede narrow">{message}</p>
       <button type="button" className="ghost" onClick={onBack}>
         Done

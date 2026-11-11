@@ -165,6 +165,35 @@ export interface CloneEntry {
   scanPath: string | null;
 }
 
+export interface CloneGroup {
+  /** Path inside the clone, e.g. "Photos & Videos" or "Apps/WhatsApp". */
+  id: string;
+  label: string;
+  media: Media;
+  files: number;
+  bytes: number;
+  sample: string[];
+}
+
+export interface CloneItem {
+  path: string;
+  name: string;
+  media: Media;
+  size: number;
+  time: number | null;
+}
+
+export interface Selection {
+  groups: string[];
+  files: string[];
+}
+
+export interface Transferred {
+  files: number;
+  bytes: number;
+  notes: string[];
+}
+
 export interface Exported {
   folder: string;
   files: number;
@@ -194,6 +223,13 @@ export const cancelScan = () => call<void>("cancel_scan");
 export const cloneDevice = (device: Device, options: CloneOptions) =>
   call<CloneEntry>("clone_device", { device, options, tzOffsetMinutes: localOffsetMinutes() });
 export const listClones = () => call<CloneEntry[]>("list_clones");
+export const cloneGroups = (folder: string) => call<CloneGroup[]>("clone_groups", { folder });
+export const cloneItems = (folder: string, group: string, offset: number, limit: number) =>
+  call<[CloneItem[], number]>("clone_items", { folder, group, offset, limit });
+export const cloneThumbnail = (folder: string, path: string) =>
+  call<string | null>("clone_thumbnail", { folder, path });
+export const transferClone = (folder: string, device: Device, selection: Selection, album: string) =>
+  call<Transferred>("transfer_clone", { folder, device, selection, album });
 export const restoreClone = (folder: string, device: Device, password: string | null) =>
   call<string>("restore_clone", { folder, device, password });
 export const query = (q: Query) => call<QueryResult>("query", { query: q });

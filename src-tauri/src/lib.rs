@@ -18,6 +18,7 @@ use banker_core::export::Exported;
 use banker_core::preview::{CardPreview, Preview};
 use banker_core::scan::Progress;
 use banker_core::timeline::{Query, QueryResult};
+use banker_core::transfer::{Group, Item, Selection, Transferred};
 use banker_core::Report;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -151,13 +152,66 @@ async fn restore_clone(
         let mut progress = |p: &Progress| {
             let _ = app.emit("scan-progress", p);
         };
-        banker_core::clone::restore(
-            std::path::Path::new(&folder),
-            &device,
-            password.as_deref(),
-            &cancel,
-            &mut progress,
-        )
+        let clone = banker_core::clone::clone_folder(&home(), &folder)?;
+        banker_core::clone::restore(&clone, &device, password.as_deref(), &cancel, &mut progress)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn clone_groups(folder: String) -> Result<Vec<Group>, String> {
+    blocking(move || {
+        let clone = banker_core::clone::clone_folder(&home(), &folder)?;
+        Ok(banker_core::transfer::groups(&clone))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn clone_items(
+    folder: String,
+    group: String,
+    offset: usize,
+    limit: usize,
+) -> Result<(Vec<Item>, usize), String> {
+    blocking(move || {
+        let clone = banker_core::clone::clone_folder(&home(), &folder)?;
+        banker_core::transfer::items(&clone, &group, offset, limit)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn clone_thumbnail(
+    app: AppHandle,
+    folder: String,
+    path: String,
+) -> Result<Option<String>, String> {
+    let cache = work_dir(&app)?.join("clone-thumbnails");
+    blocking(move || {
+        let clone = banker_core::clone::clone_folder(&home(), &folder)?;
+        Ok(banker_core::transfer::thumbnail(&clone, &path, &cache))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn transfer_clone(
+    app: AppHandle,
+    session: State<'_, Session>,
+    folder: String,
+    device: Device,
+    selection: Selection,
+    album: String,
+) -> Result<Transferred, String> {
+    let cancel = session.cancel.clone();
+    cancel.store(false, Ordering::Relaxed);
+    blocking(move || {
+        let clone = banker_core::clone::clone_folder(&home(), &folder)?;
+        let mut progress = |p: &Progress| {
+            let _ = app.emit("scan-progress", p);
+        };
+        banker_core::transfer::transfer(&clone, &device, &selection, &album, &cancel, &mut progress)
     })
     .await
 }
@@ -242,6 +296,10 @@ pub fn run() {
             clone_device,
             list_clones,
             restore_clone,
+            clone_groups,
+            clone_items,
+            clone_thumbnail,
+            transfer_clone,
             query,
             card_preview,
             preview,

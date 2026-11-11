@@ -65,6 +65,20 @@ app file in shared storage, organised the same way, and *Restore* copies them
 back. Android does not let apps, settings or messages be copied without
 rooting the phone, so an Android clone cannot rebuild a whole phone.
 
+## Move a clone to a new phone
+
+Unplug the cloned phone and plug in the new one: Banker offers to transfer
+the clone's files (also from *Transfer to another phone* on the finished
+clone). For an **Android** phone, pick whole groups (Photos & Videos, each
+app, Downloads, ...) or single files, or transfer everything. Photos and
+videos go into the Gallery album "From <old phone>"; app media into
+Pictures, Movies, Music or Documents; downloads and documents where Android
+keeps them. Nothing on the new phone is removed. For a new **iPhone** from an
+iPhone clone, the transfer is a full restore, which is how Apple moves one
+iPhone to another; Apple lets no app add single files to an iPhone. An
+Android clone cannot go onto an iPhone by cable (Apple's Move to iOS app is
+the way).
+
 ## Set up a Mac for phones
 
 ```sh
@@ -105,6 +119,7 @@ crates/banker-core/    All the logic. No Tauri, so it builds and tests on Linux.
   timeline.rs          Search, filters, and year-to-minute grouping.
   devices.rs           Finding drives and phones; copying phones to the Mac.
   clone.rs             Clone this device: copy, organise, zip, restore.
+  transfer.rs          Moving a clone's files onto another phone.
   preview.rs           Showing each finding as what it is.
   export.rs            Thumbnails, and saving findings by app and day.
   tests/fixtures/      Databases written by real SQLite, with known deletions.
