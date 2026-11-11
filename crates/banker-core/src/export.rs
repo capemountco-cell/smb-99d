@@ -94,7 +94,7 @@ fn day(t: Option<i64>, offset: i64) -> String {
     }
 }
 
-fn clean(name: &str) -> String {
+pub(crate) fn clean(name: &str) -> String {
     let s: String = name
         .chars()
         .map(|c| {
@@ -113,7 +113,7 @@ fn clean(name: &str) -> String {
     }
 }
 
-fn unique(path: PathBuf) -> PathBuf {
+pub(crate) fn unique(path: PathBuf) -> PathBuf {
     if !path.exists() {
         return path;
     }

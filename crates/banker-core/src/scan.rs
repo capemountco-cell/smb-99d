@@ -23,6 +23,8 @@ pub struct Progress {
     pub files: u64,
     pub findings: usize,
     pub current: String,
+    /// How far along, when the work knows its total (iPhone backups do).
+    pub percent: Option<u8>,
 }
 
 /// Databases are read into memory whole; larger ones are skipped.
@@ -120,6 +122,7 @@ impl Scanner<'_> {
             files: report.files_checked,
             findings: report.findings.len(),
             current: String::new(),
+            percent: None,
         });
         report
     }
@@ -131,6 +134,7 @@ impl Scanner<'_> {
                 files: report.files_checked,
                 findings: report.findings.len(),
                 current: current.into(),
+                percent: None,
             });
         }
     }

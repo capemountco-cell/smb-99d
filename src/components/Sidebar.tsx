@@ -8,8 +8,10 @@ interface Props {
   discovery: Discovery;
   looking: boolean;
   selected: Device | null;
-  /** The device being scanned: amber. */
+  /** The device Banker is working on: amber. */
   scanningId: string | null;
+  /** What it is doing to it, e.g. "Cloning…". */
+  workingLabel: string;
   /** The device whose results are on screen and include deletions: red. */
   foundId: string | null;
   /** Icons only, to give results room. */
@@ -20,14 +22,24 @@ interface Props {
 }
 
 export function Sidebar(props: Props) {
-  const { discovery, looking, selected, scanningId, foundId, compact, disabled, onSelect, onRefresh } =
-    props;
+  const {
+    discovery,
+    looking,
+    selected,
+    scanningId,
+    workingLabel,
+    foundId,
+    compact,
+    disabled,
+    onSelect,
+    onRefresh,
+  } = props;
   const [folder, setFolder] = useState("");
   const connected = discovery.devices.filter((d) => d.kind !== "backup");
   const backups = discovery.devices.filter((d) => d.kind === "backup");
 
   const marker = (d: Device) => {
-    if (d.id === scanningId) return <span className="dot working" title="Scanning" />;
+    if (d.id === scanningId) return <span className="dot working" title={workingLabel} />;
     if (d.problem) return <span className="dot waiting" title={d.problem} />;
     if (d.id === foundId) return <span className="dot deleted" title="Deleted items found" />;
     return null;
@@ -50,7 +62,7 @@ export function Sidebar(props: Props) {
             <span className="device-text">
               <span className="device-name">{d.name}</span>
               <span className="device-detail">
-                {d.id === scanningId ? "Scanning…" : (d.problem ?? d.detail)}
+                {d.id === scanningId ? workingLabel : (d.problem ?? d.detail)}
               </span>
             </span>
           )}

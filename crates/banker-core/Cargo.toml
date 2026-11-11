@@ -10,7 +10,5 @@ publish = false
 # Findings cross the IPC boundary as JSON, so the types derive Serialize here
 # rather than being mirrored by hand in the Tauri crate.
 serde = { workspace = true }
-
-[dev-dependencies]
-# Only to check the JSON the UI receives.
+# Each clone keeps a clone.json describing it, so it can be listed and restored.
 serde_json = { workspace = true }

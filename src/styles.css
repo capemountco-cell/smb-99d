@@ -1461,3 +1461,245 @@ button.link {
   overflow: hidden;
   clip-path: inset(50%);
 }
+
+/* Saved: green once, when a clone or restore finishes. */
+
+.shell[data-state="saved"] .main::before {
+  opacity: 1;
+  background: radial-gradient(ellipse 60% 70% at 55% 0%, rgba(74, 222, 128, 0.12), transparent 70%);
+}
+
+.state-pill.saved {
+  background: rgba(74, 222, 128, 0.14);
+  color: var(--saved-text);
+}
+
+/* A known percentage fills the ring instead of spinning it. */
+.ring.known,
+.ring.known .ring-inner {
+  animation: none;
+}
+
+.ring.known {
+  background: conic-gradient(var(--working) 0 var(--done), rgba(255, 255, 255, 0.08) var(--done) 100%);
+}
+
+/* Clone and restore */
+
+.phone-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.clone-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 22px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-hi);
+  font-size: 15px;
+}
+
+.link-button {
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.link-button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+/* Erasing a phone is the one destructive action: red, like deletion. */
+button.danger {
+  background: var(--deleted-strong);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.wide-button {
+  width: 100%;
+  padding: 12px;
+  font-size: 15px;
+}
+
+.center-overlay {
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+}
+
+.sheet {
+  width: min(540px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 20px;
+  border: 1px solid var(--line-strong);
+  background: #111113;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+
+.sheet-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sheet-head h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.sheet .lede {
+  font-size: 14px;
+}
+
+.clone-contents {
+  list-style: none;
+  margin: 0;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.clone-contents li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.clone-contents strong {
+  color: var(--text);
+}
+
+.option {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: default;
+}
+
+.check input {
+  margin-top: 3px;
+  accent-color: var(--text);
+}
+
+.check > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.password-row {
+  display: flex;
+  gap: 8px;
+  padding-left: 26px;
+}
+
+.password-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.clone-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.clone-choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.clone-choice.on {
+  border-color: var(--text);
+  background: var(--panel-hi);
+}
+
+.clone-choice input {
+  accent-color: var(--text);
+}
+
+.clone-choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.warning {
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 90, 78, 0.4);
+  background: rgba(255, 90, 78, 0.07);
+}
+
+.warning ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clone-stats {
+  display: flex;
+  gap: 14px;
+}
+
+.clone-stats div {
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.clone-stats strong {
+  font-size: 26px;
+  font-weight: 400;
+}
+
+.narrow-banner {
+  max-width: 560px;
+  text-align: left;
+}

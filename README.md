@@ -40,6 +40,31 @@ as `WhatsApp/`). Pick an app to see everything deleted from it.
   drive's free space is not done yet. SSDs erase freed space on their own
   (TRIM), so there is usually nothing left there anyway.
 
+## Clone this device
+
+One button copies a whole phone to `~/Banker Backups/<name> clone <date>/`:
+
+- `Restore backup/`: the restorable copy. For an **iPhone** this is a
+  standard Apple backup, the format Finder makes, and Banker's *Restore from
+  a clone* erases an iPhone and restores it completely, onto the same phone
+  or a new one (`idevicebackup2 restore`). Find My has to be off on the
+  phone. Apps download again from the App Store with their data, as with
+  any Apple restore. Saved passwords, Health, Wi-Fi and call history are
+  only included when the clone has a backup password, which Apple then uses
+  for every backup of that phone.
+- `Photos & Videos/<year>/<year-month>/`, `Apps/<app>/<year-month>/`,
+  `Files on iPhone/`, `Downloads/`, `Documents/`, `Audio/`: everything
+  organised to browse, with original dates. On APFS these copies are clones
+  of the backup's files and take no extra space.
+- `<name> <date>.zip` (optional): the restorable copy in one file. Banker
+  restores from it if the folder is gone.
+- `clone.json`: what the clone is, so Banker can list it.
+
+For **Android**, the clone holds every photo, video, download, document and
+app file in shared storage, organised the same way, and *Restore* copies them
+back. Android does not let apps, settings or messages be copied without
+rooting the phone, so an Android clone cannot rebuild a whole phone.
+
 ## Set up a Mac for phones
 
 ```sh
@@ -79,6 +104,8 @@ crates/banker-core/    All the logic. No Tauri, so it builds and tests on Linux.
   scan.rs              Walking a device and collecting findings.
   timeline.rs          Search, filters, and year-to-minute grouping.
   devices.rs           Finding drives and phones; copying phones to the Mac.
+  clone.rs             Clone this device: copy, organise, zip, restore.
+  preview.rs           Showing each finding as what it is.
   export.rs            Thumbnails, and saving findings by app and day.
   tests/fixtures/      Databases written by real SQLite, with known deletions.
 src-tauri/             The native shell: window, commands, bundling.

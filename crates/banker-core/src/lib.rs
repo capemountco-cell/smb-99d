@@ -8,6 +8,7 @@
 //! and rows are read only to tell them apart, and are never reported.
 
 pub mod carve;
+pub mod clone;
 pub mod devices;
 pub mod export;
 pub mod integrity;

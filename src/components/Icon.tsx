@@ -84,6 +84,12 @@ const PATHS = {
   back: <path d="M15 18l-6-6 6-6" />,
   check: <path d="M5 12l5 5 9-10" />,
   play: <path d="M8 5l11 7-11 7z" />,
+  copy: (
+    <>
+      <rect x="8" y="8" width="13" height="13" rx="3" />
+      <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+    </>
+  ),
   refresh: <path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" />,
 } as const;
 

@@ -67,6 +67,8 @@ export interface Progress {
   files: number;
   findings: number;
   current: string;
+  /** How far along, when known (iPhone backups and restores). */
+  percent: number | null;
 }
 
 export interface ScanSummary {
@@ -132,6 +134,37 @@ export type Preview =
   | { kind: "picture"; dataUrl: string }
   | { kind: "nothing"; reason: string };
 
+export interface CloneOptions {
+  /** iPhone only: a backup password, so passwords, Health and Wi-Fi are included. */
+  password: string | null;
+  makeZip: boolean;
+}
+
+export interface CloneInfo {
+  version: number;
+  deviceName: string;
+  kind: DeviceKind;
+  deviceId: string;
+  model: string | null;
+  osVersion: string | null;
+  created: number;
+  encrypted: boolean;
+  zip: string | null;
+  photos: number;
+  appFiles: number;
+  otherFiles: number;
+  bytes: number;
+  notes: string[];
+}
+
+export interface CloneEntry {
+  folder: string;
+  info: CloneInfo;
+  backupPresent: boolean;
+  zipPresent: boolean;
+  scanPath: string | null;
+}
+
 export interface Exported {
   folder: string;
   files: number;
@@ -158,6 +191,11 @@ export const discover = () => call<Discovery>("discover");
 export const scan = (device: Device) =>
   call<ScanSummary>("scan", { device, tzOffsetMinutes: localOffsetMinutes() });
 export const cancelScan = () => call<void>("cancel_scan");
+export const cloneDevice = (device: Device, options: CloneOptions) =>
+  call<CloneEntry>("clone_device", { device, options, tzOffsetMinutes: localOffsetMinutes() });
+export const listClones = () => call<CloneEntry[]>("list_clones");
+export const restoreClone = (folder: string, device: Device, password: string | null) =>
+  call<string>("restore_clone", { folder, device, password });
 export const query = (q: Query) => call<QueryResult>("query", { query: q });
 export const cardPreview = (id: number) => call<CardPreview>("card_preview", { id });
 export const preview = (id: number) => call<Preview>("preview", { id });

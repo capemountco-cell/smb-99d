@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use banker_core::clone::{CloneEntry, CloneOptions};
 use banker_core::devices::{Device, Discovery};
 use banker_core::export::Exported;
 use banker_core::preview::{CardPreview, Preview};
@@ -105,6 +106,63 @@ async fn scan(
 }
 
 #[tauri::command]
+async fn clone_device(
+    app: AppHandle,
+    session: State<'_, Session>,
+    device: Device,
+    options: CloneOptions,
+    tz_offset_minutes: i32,
+) -> Result<CloneEntry, String> {
+    let cancel = session.cancel.clone();
+    cancel.store(false, Ordering::Relaxed);
+    blocking(move || {
+        let mut progress = |p: &Progress| {
+            let _ = app.emit("scan-progress", p);
+        };
+        banker_core::clone::clone_device(
+            &device,
+            &home(),
+            now(),
+            tz_offset_minutes,
+            &options,
+            &cancel,
+            &mut progress,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn list_clones() -> Result<Vec<CloneEntry>, String> {
+    blocking(|| Ok(banker_core::clone::list_clones(&home()))).await
+}
+
+#[tauri::command]
+async fn restore_clone(
+    app: AppHandle,
+    session: State<'_, Session>,
+    folder: String,
+    device: Device,
+    password: Option<String>,
+) -> Result<String, String> {
+    let cancel = session.cancel.clone();
+    cancel.store(false, Ordering::Relaxed);
+    blocking(move || {
+        let mut progress = |p: &Progress| {
+            let _ = app.emit("scan-progress", p);
+        };
+        banker_core::clone::restore(
+            std::path::Path::new(&folder),
+            &device,
+            password.as_deref(),
+            &cancel,
+            &mut progress,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 fn cancel_scan(session: State<'_, Session>) {
     session.cancel.store(true, Ordering::Relaxed);
 }
@@ -181,6 +239,9 @@ pub fn run() {
             discover,
             scan,
             cancel_scan,
+            clone_device,
+            list_clones,
+            restore_clone,
             query,
             card_preview,
             preview,

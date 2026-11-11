@@ -160,7 +160,7 @@ pub fn find_tool(name: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-fn output(tool: &Path, args: &[&str]) -> Option<String> {
+pub(crate) fn output(tool: &Path, args: &[&str]) -> Option<String> {
     let out = Command::new(tool)
         .args(args)
         .stdin(Stdio::null())
@@ -267,18 +267,42 @@ pub fn backup_folder(home: &Path, device_name: &str, now_local: i64) -> PathBuf 
 /// Run a tool until it finishes or the user cancels. Its output goes to a
 /// log file in `dest`, so a chatty tool can never fill a pipe and stall.
 fn run(tool: &Path, args: &[&str], dest: &Path, cancel: &AtomicBool) -> Result<String, String> {
-    std::fs::create_dir_all(dest)
-        .map_err(|e| format!("Could not create {}: {e}", dest.display()))?;
-    let log_path = dest.join("banker-copy-log.txt");
+    run_with(tool, args, &[], dest, cancel, &mut |_| {})
+}
+
+/// `run`, plus environment variables (for secrets, which must not appear in
+/// the process list) and a callback with each new piece of output, for
+/// tools that print progress.
+pub(crate) fn run_with(
+    tool: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+    log_dir: &Path,
+    cancel: &AtomicBool,
+    on_output: &mut dyn FnMut(&str),
+) -> Result<String, String> {
+    std::fs::create_dir_all(log_dir)
+        .map_err(|e| format!("Could not create {}: {e}", log_dir.display()))?;
+    let log_path = log_dir.join("banker-copy-log.txt");
     let log = std::fs::File::create(&log_path).map_err(|e| e.to_string())?;
     let err = log.try_clone().map_err(|e| e.to_string())?;
     let mut child = Command::new(tool)
         .args(args)
+        .envs(env.iter().copied())
         .stdin(Stdio::null())
         .stdout(log)
         .stderr(err)
         .spawn()
         .map_err(|e| format!("Could not start {}: {e}", tool.display()))?;
+    let mut seen = 0usize;
+    let mut read_new = |on_output: &mut dyn FnMut(&str)| {
+        if let Ok(bytes) = std::fs::read(&log_path) {
+            if bytes.len() > seen {
+                on_output(&String::from_utf8_lossy(&bytes[seen..]));
+                seen = bytes.len();
+            }
+        }
+    };
     let status = loop {
         if cancel.load(Ordering::Relaxed) {
             let _ = child.kill();
@@ -287,10 +311,14 @@ fn run(tool: &Path, args: &[&str], dest: &Path, cancel: &AtomicBool) -> Result<S
         }
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) => std::thread::sleep(Duration::from_millis(250)),
+            Ok(None) => {
+                read_new(on_output);
+                std::thread::sleep(Duration::from_millis(400));
+            }
             Err(e) => return Err(e.to_string()),
         }
     };
+    read_new(on_output);
     let mut text = String::new();
     if let Ok(mut f) = std::fs::File::open(&log_path) {
         let _ = f.read_to_string(&mut text);
@@ -301,6 +329,47 @@ fn run(tool: &Path, args: &[&str], dest: &Path, cancel: &AtomicBool) -> Result<S
         let tail: Vec<&str> = text.lines().rev().take(3).collect();
         Err(tail.into_iter().rev().collect::<Vec<_>>().join(" "))
     }
+}
+
+/// The last "NN%" a progress-printing tool wrote.
+pub fn last_percent(output: &str) -> Option<u8> {
+    let bytes = output.as_bytes();
+    let mut i = bytes.len();
+    while i > 0 {
+        i -= 1;
+        if bytes[i] != b'%' {
+            continue;
+        }
+        let digits_start = bytes[..i]
+            .iter()
+            .rposition(|b| !b.is_ascii_digit())
+            .map_or(0, |p| p + 1);
+        if digits_start < i {
+            if let Ok(n) = output[digits_start..i].parse::<u16>() {
+                if n <= 100 {
+                    return Some(n as u8);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Make sure the iPhone trusts this Mac, asking it to if not.
+pub(crate) fn pair_iphone(udid: &str, log_dir: &Path, cancel: &AtomicBool) -> Result<(), String> {
+    let pair = find_tool("idevicepair").ok_or("Install libimobiledevice first.")?;
+    if run(&pair, &["-u", udid, "validate"], log_dir, cancel).is_ok() {
+        return Ok(());
+    }
+    run(&pair, &["-u", udid, "pair"], log_dir, cancel)
+        .map(|_| ())
+        .map_err(|e| {
+            if e.contains("trust") || e.contains("passcode") || e.contains("Trust") {
+                "On the iPhone, unlock it, tap Trust and enter the passcode, then try again.".into()
+            } else {
+                format!("The iPhone did not pair with this Mac: {e}")
+            }
+        })
 }
 
 /// The outcome of `adb pull`. On a real phone it nearly always exits with an
@@ -361,18 +430,8 @@ pub fn copy_to_mac(
             Ok((dest.to_path_buf(), warning))
         }
         DeviceKind::Iphone => {
-            let pair = find_tool("idevicepair").ok_or("Install libimobiledevice first.")?;
             let backup = find_tool("idevicebackup2").ok_or("Install libimobiledevice first.")?;
-            if run(&pair, &["-u", &device.id, "validate"], dest, cancel).is_err() {
-                let paired = run(&pair, &["-u", &device.id, "pair"], dest, cancel);
-                if let Err(e) = paired {
-                    return Err(if e.contains("trust") || e.contains("passcode") {
-                        "On the iPhone, unlock it, tap Trust and enter the passcode, then press Scan again.".into()
-                    } else {
-                        format!("The iPhone did not pair with this Mac: {e}")
-                    });
-                }
-            }
+            pair_iphone(&device.id, dest, cancel)?;
             let target = dest.display().to_string();
             run(
                 &backup,
@@ -445,6 +504,16 @@ mod tests {
         let kept = android_pull_outcome(Err("adb: error: Permission denied".into()), &dir);
         assert!(kept.unwrap().unwrap().contains("could not be copied"));
         assert!(android_pull_outcome(Err("Stopped.".into()), &dir).is_err());
+    }
+
+    #[test]
+    fn reads_progress_percentages() {
+        assert_eq!(
+            last_percent("[==   ] 12% Finished\n[=====] 57% Fin"),
+            Some(57)
+        );
+        assert_eq!(last_percent("no numbers"), None);
+        assert_eq!(last_percent("250% nonsense 9%"), Some(9));
     }
 
     #[test]
