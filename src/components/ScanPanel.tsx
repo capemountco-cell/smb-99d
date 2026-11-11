@@ -1,4 +1,4 @@
-import { DEVICE_ICON, count } from "../lib/format";
+import { count } from "../lib/format";
 import type { CloneEntry, Device, Progress, Transferred } from "../lib/native";
 import { Icon, type IconName } from "./Icon";
 
@@ -61,7 +61,7 @@ function steps(stage: Working): Step[] {
     return mark(["Prepare the clone", "Restore"], /restor|copying the files/i.test(phase) ? 1 : 0);
   }
   const copies = stage.device.kind === "iphone" || stage.device.kind === "android";
-  const copying = copies && /back|copy/i.test(phase);
+  const copying = copies && /backing up|copying/i.test(phase);
   return copies
     ? mark(["Copy to this Mac", "Look for deleted and damaged items"], copying ? 0 : 1)
     : mark(["Look for deleted and damaged items"], 0);
@@ -153,13 +153,11 @@ export function ScanPanel({ device, stage, onScan, onClone, onRestore, onCancel 
   if (!device) {
     return (
       <div className="hero">
-        <div className="device-art empty" aria-hidden>
-          <Icon name="search" size={56} stroke={1.4} />
-        </div>
-        <h1 className="display">Find what was deleted</h1>
-        <p className="lede narrow">
-          Connect a drive, an iPhone or an Android phone with a cable and pick it on the left.
-          One press shows every deleted photo, message and file, and anything damaged.
+        <p className="eyebrow">Drives · iPhones · Android phones</p>
+        <h1 className="display xl">Find what was deleted</h1>
+        <p className="lede big narrow">
+          Connect a device with a cable and choose it under Devices. One press shows every deleted
+          photo, message and file, and anything damaged.
         </p>
       </div>
     );
@@ -168,62 +166,57 @@ export function ScanPanel({ device, stage, onScan, onClone, onRestore, onCancel 
   const phone = device.kind === "iphone" || device.kind === "android";
   return (
     <div className="hero">
-      <div className="hero-row">
-        <div className="device-art" aria-hidden>
-          <Icon name={DEVICE_ICON[device.kind]} size={64} stroke={1.2} />
-        </div>
-        <div className="hero-text">
-          <h1 className="display">{device.name}</h1>
-          <p className="lede">
-            See everything that was deleted from it, and anything damaged, on a timeline down to
-            the minute.
-          </p>
-          <ul className="features">
-            {FEATURES.map((f) => (
-              <li key={f.label}>
-                <span className="tile">
-                  <Icon name={f.icon} />
-                </span>
-                {f.label}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
+      <p className="eyebrow">{device.detail}</p>
+      <h1 className="display xl">{device.name}</h1>
+      <p className="lede big narrow">
+        Everything that was deleted from it, and anything damaged, on a timeline down to the minute.
+      </p>
       {device.problem && <p className="waiting-text narrow">{device.problem}</p>}
       {stage.kind === "failed" && <p className="banner error selectable">{stage.message}</p>}
-      <div className="scan-wrap">
-        <button
-          type="button"
-          className="scan-button"
-          disabled={device.problem !== null}
-          onClick={() => onScan(device)}
-        >
-          Scan
-        </button>
-      </div>
-      <p className="muted small-text">{CAPTION[device.kind]}</p>
-      {phone && (
-        <div className="phone-actions">
+      <div className="actions">
+        <div className="scan-wrap">
           <button
             type="button"
-            className="clone-button"
+            className="scan-button"
             disabled={device.problem !== null}
-            onClick={() => onClone(device)}
+            onClick={() => onScan(device)}
           >
-            <Icon name="copy" size={17} />
-            Clone this device
-          </button>
-          <button
-            type="button"
-            className="link-button"
-            disabled={device.problem !== null}
-            onClick={() => onRestore(device)}
-          >
-            Restore from a clone…
+            Scan
           </button>
         </div>
-      )}
+        {phone && (
+          <div className="phone-actions">
+            <button
+              type="button"
+              className="clone-button"
+              disabled={device.problem !== null}
+              onClick={() => onClone(device)}
+            >
+              <Icon name="copy" size={16} />
+              Clone this device
+            </button>
+            <button
+              type="button"
+              className="link-button"
+              disabled={device.problem !== null}
+              onClick={() => onRestore(device)}
+            >
+              Restore from a clone ›
+            </button>
+          </div>
+        )}
+      </div>
+      <p className="muted small-text">{CAPTION[device.kind]}</p>
+      <ul className="features">
+        {FEATURES.map((f) => (
+          <li key={f.label}>
+            <span className="tile">
+              <Icon name={f.icon} />
+            </span>
+            {f.label}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
