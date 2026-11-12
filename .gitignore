@@ -8,3 +8,5 @@ src-tauri/gen/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+src-tauri/resources/tools/bin/
+src-tauri/resources/tools/lib/

@@ -64,6 +64,9 @@
           "y": 190
         }
       }
+    },
+    "resources": {
+      "resources/tools/": "tools/"
     }
   }
 }

@@ -289,6 +289,14 @@ fn reveal(path: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(Session::default())
+        .setup(|app| {
+            // The phone tools bundled inside the app (scripts/bundle-tools.sh).
+            // The core looks there before PATH and Homebrew.
+            if let Ok(dir) = app.path().resource_dir() {
+                std::env::set_var("BANKER_TOOLS_DIR", dir.join("tools").join("bin"));
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             discover,
             scan,

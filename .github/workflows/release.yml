@@ -63,6 +63,8 @@ jobs:
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/cert.p12"
 
+      - name: Bundle the phone tools (libimobiledevice, adb)
+        run: bash scripts/bundle-tools.sh
       - name: Build, sign, notarize and verify
         env:
           # Read by Tauri's bundler. Empty means ad-hoc signing and no notarization.

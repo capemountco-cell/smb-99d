@@ -70,6 +70,8 @@ jobs:
       - run: npm ci
       - name: Clippy (whole workspace, including the Tauri crate)
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Bundle the phone tools (libimobiledevice, adb)
+        run: bash scripts/bundle-tools.sh
       - name: Build and verify the .dmg
         # CI=true is already set by GitHub, so the Finder window styling,
         # which needs a logged-in desktop, is skipped automatically.
