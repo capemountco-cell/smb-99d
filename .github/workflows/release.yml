@@ -19,6 +19,9 @@ jobs:
   dmg:
     name: Universal .dmg
     runs-on: macos-latest
+    # A normal build takes a few minutes. Without a limit a hang holds the
+    # runner for six hours before GitHub cancels it.
+    timeout-minutes: 45
     env:
       # Secrets cannot be read in an `if:`, so expose only whether one is set.
       HAS_SIGNING_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}

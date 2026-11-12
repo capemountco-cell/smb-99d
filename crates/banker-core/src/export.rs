@@ -15,6 +15,40 @@ use crate::util::base64;
 
 const INLINE_LIMIT: u64 = 4 * 1024 * 1024;
 
+/// macOS's own thumbnail tools. Off in tests: on a Mac with no logged-in
+/// desktop (CI), `qlmanage` waits forever.
+const USE_SYSTEM_TOOLS: bool = !cfg!(test);
+
+/// A thumbnail tool gets this long before Banker gives up on it and shows
+/// the item's icon instead, so one odd file can never freeze a preview.
+const TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Run a command quietly; true if it succeeded within `TOOL_TIMEOUT`.
+fn finishes(command: &mut Command) -> bool {
+    let Ok(mut child) = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if started.elapsed() < TOOL_TIMEOUT => {
+                std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
 fn data_url(bytes: &[u8]) -> Option<String> {
     let mime = match sniff(bytes) {
         Some(Kind::Jpeg) => "image/jpeg",
@@ -41,31 +75,27 @@ pub fn thumbnail(f: &Finding, cache: &Path) -> Option<String> {
         return data_url(&bytes);
     }
     let _ = fs::create_dir_all(cache);
-    if f.media == Media::Image && Path::new("/usr/bin/sips").is_file() {
-        let made = Command::new("/usr/bin/sips")
-            .args(["-s", "format", "jpeg", "-Z", "360"])
-            .arg(&path)
-            .arg("--out")
-            .arg(&cached)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success());
+    if USE_SYSTEM_TOOLS && f.media == Media::Image && Path::new("/usr/bin/sips").is_file() {
+        let made = finishes(
+            Command::new("/usr/bin/sips")
+                .args(["-s", "format", "jpeg", "-Z", "360"])
+                .arg(&path)
+                .arg("--out")
+                .arg(&cached),
+        );
         if made {
             return data_url(&fs::read(&cached).ok()?);
         }
     }
-    if Path::new("/usr/bin/qlmanage").is_file() {
+    if USE_SYSTEM_TOOLS && Path::new("/usr/bin/qlmanage").is_file() {
         let dir = cache.join(format!("ql-{}", f.id));
         let _ = fs::create_dir_all(&dir);
-        let ok = Command::new("/usr/bin/qlmanage")
-            .args(["-t", "-s", "360", "-o"])
-            .arg(&dir)
-            .arg(&path)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success());
+        let ok = finishes(
+            Command::new("/usr/bin/qlmanage")
+                .args(["-t", "-s", "360", "-o"])
+                .arg(&dir)
+                .arg(&path),
+        );
         if ok {
             let png = fs::read_dir(&dir)
                 .ok()?
@@ -279,6 +309,16 @@ mod tests {
             fs::read_to_string(dir.join("out/WhatsApp/Undated/Deleted messages and records.txt"))
                 .unwrap();
         assert!(notes.contains("hello again"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_tool_that_hangs_is_given_up_on() {
+        let started = std::time::Instant::now();
+        assert!(finishes(Command::new("/bin/sh").args(["-c", "exit 0"])));
+        assert!(!finishes(Command::new("/bin/sh").args(["-c", "exit 3"])));
+        assert!(!finishes(&mut Command::new("/nonexistent/tool")));
+        assert!(started.elapsed() < TOOL_TIMEOUT);
     }
 
     #[test]

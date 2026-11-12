@@ -54,6 +54,9 @@ jobs:
     # The oldest macOS the app supports is set by minimumSystemVersion in
     # tauri.conf.json, not by the runner.
     runs-on: macos-latest
+    # A normal build takes a few minutes. Without a limit a hang holds the
+    # runner for six hours before GitHub cancels it.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
