@@ -83,6 +83,13 @@ const PATHS = {
   trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />,
   back: <path d="M15 18l-6-6 6-6" />,
   down: <path d="M6 9l6 6 6-6" />,
+  next: <path d="M9 6l6 6-6 6" />,
+  transfer: (
+    <>
+      <path d="M4 12h12M12 6l6 6-6 6" />
+      <path d="M20 4v16" />
+    </>
+  ),
   up: <path d="M18 15l-6-6-6 6" />,
   check: <path d="M5 12l5 5 9-10" />,
   play: <path d="M8 5l11 7-11 7z" />,

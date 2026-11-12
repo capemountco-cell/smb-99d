@@ -1,5 +1,7 @@
 import { count } from "../lib/format";
-import type { CloneEntry, Device, Progress, Transferred } from "../lib/native";
+import { useState } from "react";
+
+import type { CloneEntry, Device, Progress, ScanSummary, Transferred } from "../lib/native";
 import { Icon, type IconName } from "./Icon";
 
 export type Stage =
@@ -20,18 +22,24 @@ export type Working = Extract<Stage, { kind: "scanning" | "cloning" | "restoring
 interface Props {
   device: Device | null;
   stage: Stage;
+  clones: CloneEntry[];
+  /** The last scan of this device in this session, if any. */
+  lastScan: ScanSummary | null;
   onScan: (device: Device) => void;
   onClone: (device: Device) => void;
   onRestore: (device: Device) => void;
+  onMove: (device: Device, clone: CloneEntry) => void;
+  onOpenResults: () => void;
+  onChooseDevice: () => void;
   onCancel: () => void;
 }
 
 const CAPTION: Record<Device["kind"], string> = {
-  drive: "Reads the drive in place · changes nothing on it",
-  folder: "Reads the folder in place · changes nothing in it",
-  backup: "Reads this backup · changes nothing",
-  iphone: "Backs up to this Mac first · changes nothing on the phone",
-  android: "Copies to this Mac first · changes nothing on the phone",
+  drive: "Banker reads the drive where it is and changes nothing on it",
+  folder: "Banker reads the folder where it is and changes nothing in it",
+  backup: "Banker reads this backup and changes nothing",
+  iphone: "Banker backs it up to this Mac first, and nothing on the phone changes",
+  android: "Banker copies it to this Mac first, and nothing on the phone changes",
 };
 
 type Feature = { icon: IconName; label: string };
@@ -157,7 +165,28 @@ export function WorkingView({ stage, onCancel }: { stage: Working; onCancel: () 
   );
 }
 
-export function ScanPanel({ device, stage, onScan, onClone, onRestore, onCancel }: Props) {
+/** An action card: always clickable. When it cannot run yet, it says why. */
+interface Action {
+  icon: IconName;
+  title: string;
+  /** What it does, or why it cannot run yet and what to do. */
+  line: string;
+  ready: boolean;
+  run: () => void;
+}
+
+const KIND_NAME: Record<Device["kind"], string> = {
+  iphone: "iPhone",
+  android: "Android phone",
+  drive: "drive",
+  folder: "folder",
+  backup: "backup",
+};
+
+export function ScanPanel(props: Props) {
+  const { device, stage, clones, lastScan, onScan, onCancel } = props;
+  const [notice, setNotice] = useState<string | null>(null);
+
   if (
     stage.kind === "scanning" ||
     stage.kind === "cloning" ||
@@ -169,71 +198,189 @@ export function ScanPanel({ device, stage, onScan, onClone, onRestore, onCancel 
 
   if (!device) {
     return (
-      <div className="hero">
-        <p className="eyebrow">Drives · iPhones · Android phones</p>
-        <h1 className="display xl">Find what was deleted</h1>
-        <p className="lede big narrow">
-          Connect a device with a cable and choose it under Devices. One press shows every deleted
-          photo, message and file, and anything damaged.
+      <div className="home empty-home">
+        <span className="status-chip">
+          <span className="chip-dot hollow" />
+          No device chosen
+        </span>
+        <h1 className="home-title">Find what was deleted</h1>
+        <p className="home-lede">
+          Plug in an iPhone, an Android phone or a drive with a cable, then choose it from the
+          switcher at the top right. Banker lists only what was deleted or damaged.
         </p>
+        <button type="button" className="primary big" onClick={props.onChooseDevice}>
+          Choose a device
+        </button>
       </div>
     );
   }
 
   const phone = device.kind === "iphone" || device.kind === "android";
+  const needs = device.problem;
+  const own = clones.filter((c) => c.info.deviceId === device.id);
+  const fromOther = clones.find(
+    (c) =>
+      c.info.deviceId !== device.id &&
+      (device.kind === "android" || (c.info.kind === "iphone" && (c.backupPresent || c.zipPresent))),
+  );
+  const sameKind = clones.filter(
+    (c) => c.info.kind === device.kind && (c.backupPresent || c.zipPresent),
+  );
+  const blocked = needs ? `First: ${needs}` : null;
+
+  const actions: Action[] = phone
+    ? [
+        {
+          icon: "copy",
+          title: "Clone this phone",
+          line: blocked ?? "A full copy on this Mac that can restore it, or set up a new phone.",
+          ready: !needs,
+          run: () => props.onClone(device),
+        },
+        {
+          icon: "transfer",
+          title: "Move files from another phone",
+          line:
+            blocked ??
+            (fromOther
+              ? `From the clone of ${fromOther.info.deviceName}. Pick files or move everything.`
+              : "No clone of another phone on this Mac yet. Clone the old phone first, then plug this one in."),
+          ready: !needs && fromOther !== undefined,
+          run: () => fromOther && props.onMove(device, fromOther),
+        },
+        {
+          icon: "refresh",
+          title: "Restore from a clone",
+          line:
+            blocked ??
+            (sameKind.length > 0
+              ? device.kind === "iphone"
+                ? "Erases this iPhone and puts a clone back on it. Asks before anything happens."
+                : "Copies a clone's photos and files back onto this phone."
+              : `No clone of an ${KIND_NAME[device.kind]} on this Mac yet. Clone one first.`),
+          ready: !needs && sameKind.length > 0,
+          run: () => props.onRestore(device),
+        },
+      ]
+    : [];
+
+  const status = needs ? "Needs you" : device.kind === "drive" ? "Connected · read in place" : "Ready";
+
   return (
-    <div className="hero">
-      <p className="eyebrow">{device.detail}</p>
-      <h1 className={`display ${titleSize(device.name)}`}>{device.name}</h1>
-      <p className="lede big narrow">
-        Everything that was deleted from it, and anything damaged, on a timeline down to the minute.
-      </p>
-      {device.problem && <p className="waiting-text narrow">{device.problem}</p>}
-      {stage.kind === "failed" && <p className="banner error selectable">{stage.message}</p>}
-      <div className="actions">
-        <div className="scan-wrap">
-          <button
-            type="button"
-            className="scan-button"
-            disabled={device.problem !== null}
-            onClick={() => onScan(device)}
-          >
-            Scan
+    <div className="home">
+      <section className="home-main">
+        <span className={`status-chip ${needs ? "needs" : ""}`}>
+          <span className={`chip-dot ${needs ? "hollow" : ""}`} />
+          {status}
+        </span>
+        <h1 className={`home-title ${titleSize(device.name)}`}>{device.name}</h1>
+        <p className="home-lede">
+          {CAPTION[device.kind]}. It lists only what was deleted or damaged.
+        </p>
+        {needs && <p className="needs-box">{needs}</p>}
+        {stage.kind === "failed" && <p className="banner error selectable">{stage.message}</p>}
+        <div className="home-cta">
+          <button type="button" className="primary big" disabled={!!needs} onClick={() => onScan(device)}>
+            <Icon name="search" size={18} stroke={2.2} />
+            Scan for deleted items
           </button>
+          {lastScan && (
+            <button type="button" className="text-button" onClick={props.onOpenResults}>
+              See the last results ›
+            </button>
+          )}
         </div>
-        {phone && (
-          <div className="phone-actions">
-            <button
-              type="button"
-              className="clone-button"
-              disabled={device.problem !== null}
-              onClick={() => onClone(device)}
-            >
-              <Icon name="copy" size={16} />
-              Clone this device
-            </button>
-            <button
-              type="button"
-              className="link-button"
-              disabled={device.problem !== null}
-              onClick={() => onRestore(device)}
-            >
-              Restore from a clone ›
-            </button>
+        <div className="stat-tiles">
+          <div className="stat">
+            <strong>{lastScan ? lastScan.findings.toLocaleString() : "—"}</strong>
+            <span>{lastScan ? "found in the last scan" : "Not scanned yet"}</span>
           </div>
+          <div className="stat">
+            <strong>{phone ? own.length || "None" : KIND_NAME[device.kind]}</strong>
+            <span>{phone ? `${own.length === 1 ? "Clone" : "Clones"} of this phone` : "Kind"}</span>
+          </div>
+          <div className="stat">
+            <strong>{lastScan ? lastScan.filesChecked.toLocaleString() : "—"}</strong>
+            <span>Files checked</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="home-side" aria-label={phone ? "More for this phone" : "What a scan finds"}>
+        <span className="section-label">{phone ? "More for this phone" : "What a scan finds"}</span>
+        {phone ? (
+          <>
+            {actions.map((a) => (
+              <button
+                key={a.title}
+                type="button"
+                className={`action-card ${a.ready ? "" : "waiting"}`}
+                onClick={() => {
+                  if (a.ready) {
+                    setNotice(null);
+                    a.run();
+                  } else {
+                    setNotice(`${a.title}: ${a.line}`);
+                  }
+                }}
+              >
+                <span className="action-tile">
+                  <Icon name={a.icon} size={20} />
+                </span>
+                <span className="action-text">
+                  <span className="action-title">{a.title}</span>
+                  <span className="action-line">{a.line}</span>
+                </span>
+                <Icon name="next" size={16} stroke={2.2} />
+              </button>
+            ))}
+            {notice && (
+              <p className="notice" role="status">
+                {notice}
+              </p>
+            )}
+          </>
+        ) : (
+          FEATURES[device.kind].map((f) => (
+            <div key={f.label} className="action-card static">
+              <span className="action-tile">
+                <Icon name={f.icon} size={20} />
+              </span>
+              <span className="action-text">
+                <span className="action-title">{f.label}</span>
+              </span>
+            </div>
+          ))
         )}
-      </div>
-      <p className="muted small-text">{CAPTION[device.kind]}</p>
-      <ul className="features">
-        {FEATURES[device.kind].map((f) => (
-          <li key={f.label}>
-            <span className="tile">
-              <Icon name={f.icon} />
-            </span>
-            {f.label}
-          </li>
-        ))}
-      </ul>
+      </section>
+    </div>
+  );
+}
+
+/** Results with nothing scanned yet: say how to start, never a dead end. */
+export function NoResults({ device, onScan, onDevice }: { device: Device | null; onScan: () => void; onDevice: () => void }) {
+  return (
+    <div className="home empty-home">
+      <span className="status-chip">
+        <span className="chip-dot hollow" />
+        No results yet
+      </span>
+      <h1 className="home-title">Nothing scanned yet</h1>
+      <p className="home-lede">
+        {device
+          ? `Scan ${device.name} and everything deleted or damaged on it shows up here, on a timeline.`
+          : "Choose a device and scan it. Everything deleted or damaged shows up here, on a timeline."}
+      </p>
+      {device && !device.problem ? (
+        <button type="button" className="primary big" onClick={onScan}>
+          <Icon name="search" size={18} stroke={2.2} />
+          Scan {device.name}
+        </button>
+      ) : (
+        <button type="button" className="secondary big" onClick={onDevice}>
+          Go to the device
+        </button>
+      )}
     </div>
   );
 }

@@ -250,7 +250,7 @@ pub fn drives(
                 id: path.display().to_string(),
                 kind: DeviceKind::Drive,
                 name,
-                detail: "Drive · scanned in place, nothing is changed".into(),
+                detail: "Drive · read in place".into(),
                 path: Some(path.display().to_string()),
                 problem: None,
             })
@@ -354,7 +354,7 @@ pub fn discover(home: &Path) -> Discovery {
                     id: udid,
                     kind: DeviceKind::Iphone,
                     name,
-                    detail: "iPhone · backed up to this Mac, then scanned".into(),
+                    detail: "iPhone · USB".into(),
                     path: None,
                     problem: None,
                 });
@@ -388,7 +388,7 @@ pub fn discover(home: &Path) -> Discovery {
                     id: serial,
                     kind: DeviceKind::Android,
                     name: model.unwrap_or_else(|| "Android phone".into()),
-                    detail: "Android · copied to this Mac, then scanned".into(),
+                    detail: "Android · USB".into(),
                     path: None,
                     problem,
                 });
@@ -426,7 +426,7 @@ pub fn discover(home: &Path) -> Discovery {
             id: phone.id,
             kind: phone.kind,
             name: product.clone(),
-            detail: format!("{product} · connected by USB"),
+            detail: format!("{product} · USB"),
             path: None,
             problem: Some(problem),
         });

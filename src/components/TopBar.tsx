@@ -1,43 +1,43 @@
 import { useEffect, useState } from "react";
 
-import { DEVICE_ICON } from "../lib/format";
-import type { Device, Discovery } from "../lib/native";
+import { DEVICE_ICON, bytes } from "../lib/format";
+import type { CloneEntry, Device, Discovery } from "../lib/native";
 import { Icon } from "./Icon";
 
-export type Section = "scan" | "clone" | "transfer" | "restore" | "backups";
+export type Place = "device" | "results" | "backups";
 
-const SECTIONS: { id: Section; label: string }[] = [
-  { id: "scan", label: "Scan" },
-  { id: "clone", label: "Clone" },
-  { id: "transfer", label: "Transfer" },
-  { id: "restore", label: "Restore" },
+/** What the switcher says about the current device, and its colour. */
+export interface DeviceState {
+  tone: "none" | "ready" | "needs" | "working" | "deleted" | "saved";
+  line: string;
+}
+
+const PLACES: { id: Place; label: string }[] = [
+  { id: "device", label: "Device" },
+  { id: "results", label: "Results" },
   { id: "backups", label: "Backups" },
 ];
 
 interface Props {
   discovery: Discovery;
+  clones: CloneEntry[];
   looking: boolean;
   selected: Device | null;
-  active: Section | "devices" | null;
-  /** The device Banker is working on, and what it is doing: amber. */
-  working: { id: string; label: string } | null;
-  /** The device whose results are on screen and include deletions: red. */
-  foundId: string | null;
-  disabled: boolean;
-  /** Sections that make no sense for the selected device right now. */
-  unavailable: Set<Section>;
-  onSection: (section: Section) => void;
+  state: DeviceState;
+  place: Place;
+  /** True while Banker works; switching device waits until it is done. */
+  busy: boolean;
+  onPlace: (place: Place) => void;
   onSelect: (device: Device) => void;
   onRefresh: () => void;
 }
 
 /**
- * The global navigation: one thin frosted bar across the top, sections in
- * the middle, the current device on the right. Devices open as a
- * full-width menu that drops down from the bar.
+ * The global bar: the Banker mark, three places that are never disabled,
+ * and the device switcher, which says what state the device is in.
  */
 export function TopBar(props: Props) {
-  const { selected, active, working, foundId, disabled, unavailable, onSection, onSelect } = props;
+  const { selected, state, place, onPlace } = props;
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -47,160 +47,157 @@ export function TopBar(props: Props) {
     return () => window.removeEventListener("keydown", key);
   }, [open]);
 
-  const pillState =
-    working && selected?.id === working.id
-      ? "working"
-      : selected && selected.id === foundId
-        ? "deleted"
-        : selected?.problem
-          ? "waiting"
-          : null;
-
   return (
     <>
-      <header className={`globalnav ${open ? "open" : ""}`}>
-        <button type="button" className="brand" onClick={() => onSection("scan")}>
-          <span className="brand-mark">
-            <Icon name="search" size={12} stroke={2.6} />
+      <header className="globalnav">
+        <button type="button" className="brand" onClick={() => onPlace("device")}>
+          <span className="brand-mark" aria-hidden>
+            B
           </span>
           Banker
         </button>
-        <nav aria-label="Main" className="nav-links">
-          <button
-            type="button"
-            className={active === "devices" || open ? "on" : ""}
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
-          >
-            Devices
-          </button>
-          {SECTIONS.map((s) => (
+        <nav aria-label="Main" className="places">
+          {PLACES.map((p) => (
             <button
-              key={s.id}
+              key={p.id}
               type="button"
-              className={active === s.id && !open ? "on" : ""}
-              disabled={disabled || unavailable.has(s.id)}
-              onClick={() => {
-                setOpen(false);
-                onSection(s.id);
-              }}
+              className={place === p.id ? "current" : ""}
+              aria-current={place === p.id ? "page" : undefined}
+              onClick={() => onPlace(p.id)}
             >
-              {s.label}
+              {p.label}
             </button>
           ))}
         </nav>
-        <div className="nav-end">
-          <button
-            type="button"
-            className={`device-pill ${pillState ?? ""}`}
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
-          >
-            {pillState === "working" || pillState === "deleted" ? (
-              <span className={`dot ${pillState}`} />
+        <button
+          type="button"
+          className={`switcher tone-${state.tone}`}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          onClick={() => setOpen(!open)}
+        >
+          <span className="switcher-tile" aria-hidden>
+            {state.tone === "ready" || state.tone === "none" ? (
+              <Icon name={selected ? DEVICE_ICON[selected.kind] : "search"} size={15} stroke={1.9} />
             ) : (
-              <Icon name={selected ? DEVICE_ICON[selected.kind] : "search"} size={14} stroke={2} />
+              <span className="switcher-dot" />
             )}
-            {selected
-              ? `${selected.name}${pillState === "working" && working ? ` · ${working.label}` : ""}`
-              : "Choose a device"}
-            <Icon name={open ? "up" : "down"} size={10} stroke={2.6} />
-          </button>
-        </div>
+          </span>
+          <span className="switcher-text">
+            <span className="switcher-name">{selected?.name ?? "Choose a device"}</span>
+            <span className="switcher-line">{state.line}</span>
+          </span>
+          <Icon name={open ? "up" : "down"} size={12} stroke={2.4} />
+        </button>
       </header>
       {open && (
         <>
-          <DevicesMenu
+          <div className="menu-scrim" onClick={() => setOpen(false)} role="presentation" />
+          <DeviceMenu
             {...props}
             onPick={(d) => {
-              onSelect(d);
+              props.onSelect(d);
+              setOpen(false);
+            }}
+            onBackups={() => {
+              onPlace("backups");
               setOpen(false);
             }}
           />
-          <div className="menu-scrim" onClick={() => setOpen(false)} role="presentation" />
         </>
       )}
     </>
   );
 }
 
-function DevicesMenu({
+function DeviceMenu({
   discovery,
+  clones,
   looking,
   selected,
-  working,
-  disabled,
+  busy,
   onRefresh,
   onPick,
-}: Props & { onPick: (d: Device) => void }) {
+  onBackups,
+}: Props & { onPick: (d: Device) => void; onBackups: () => void }) {
+  const [folderOpen, setFolderOpen] = useState(false);
   const [folder, setFolder] = useState("");
   const connected = discovery.devices.filter((d) => d.kind !== "backup");
-  const backups = discovery.devices.filter((d) => d.kind === "backup");
+  const finder = discovery.devices.filter((d) => d.kind === "backup");
 
   return (
-    <section className="devices-menu" aria-label="Devices">
-      <div className="menu-col wide">
-        <span className="menu-label">
-          Connected
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onRefresh}
-            disabled={looking}
-            aria-label="Look for devices again"
-            title="Look for devices again"
-          >
-            <Icon name="refresh" size={13} />
-          </button>
-        </span>
-        {connected.length === 0 && (
-          <p className="muted">Plug in a drive, iPhone or Android phone with a cable. It appears here.</p>
-        )}
-        {connected.map((d) => (
+    <section className="device-menu" role="menu" aria-label="Devices">
+      <div className="menu-head">
+        <span className="section-label">Connected</span>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onRefresh}
+          disabled={looking}
+          aria-label="Look for devices again"
+          title="Look for devices again"
+        >
+          <Icon name="refresh" size={13} />
+        </button>
+      </div>
+      {connected.length === 0 && (
+        <p className="menu-empty">Plug in an iPhone, an Android phone or a drive with a cable.</p>
+      )}
+      {connected.map((d) => {
+        const current = selected?.id === d.id;
+        return (
           <button
             key={d.id}
             type="button"
-            className={`menu-device ${selected?.id === d.id ? "current" : ""}`}
-            disabled={disabled && d.id !== working?.id}
+            role="menuitem"
+            className={`menu-row ${current ? "current" : ""} ${d.problem ? "needs" : ""}`}
+            disabled={busy && !current}
             onClick={() => onPick(d)}
           >
-            <Icon name={DEVICE_ICON[d.kind]} size={22} stroke={1.7} />
-            <span className="menu-device-text">
-              <span className="menu-device-name">{d.name}</span>
-              <span className="small-text muted">
-                {d.id === working?.id ? working.label : (d.problem ?? d.detail)}
-                {selected?.id === d.id ? " · selected" : ""}
-              </span>
+            <span className="menu-tile">
+              <Icon name={DEVICE_ICON[d.kind]} size={18} />
             </span>
-            {d.id === working?.id ? (
-              <span className="dot working" />
-            ) : d.problem ? (
-              <span className="dot waiting" title={d.problem} />
-            ) : null}
+            <span className="menu-text">
+              <span className="menu-name">{d.name}</span>
+              <span className="menu-line">{d.problem ? `Needs you · ${shortProblem(d.problem)}` : d.detail}</span>
+            </span>
+            {current ? <Icon name="check" size={16} stroke={2.4} /> : d.problem ? <span className="how">How</span> : null}
           </button>
-        ))}
-      </div>
+        );
+      })}
 
-      <div className="menu-col">
-        <span className="menu-label">Backups on this Mac</span>
-        {backups.length === 0 && <p className="small-text muted">None yet.</p>}
-        {backups.map((d) => (
-          <button
-            key={d.id}
-            type="button"
-            className="menu-link"
-            disabled={disabled}
-            onClick={() => onPick(d)}
-          >
-            {d.name} · {d.detail}
-          </button>
-        ))}
-      </div>
+      {(clones.length > 0 || finder.length > 0) && (
+        <>
+          <div className="menu-rule" />
+          <span className="section-label menu-pad">On this Mac</span>
+          {clones.slice(0, 3).map((c) => (
+            <button key={c.folder} type="button" role="menuitem" className="menu-link" onClick={onBackups}>
+              <span>
+                {c.info.deviceName} clone ·{" "}
+                {new Date(c.info.created * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+              </span>
+              <span className="menu-meta">{bytes(c.info.bytes)}</span>
+            </button>
+          ))}
+          {finder.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              role="menuitem"
+              className="menu-link"
+              disabled={busy}
+              onClick={() => onPick(d)}
+            >
+              <span>{d.name} · Finder backup</span>
+            </button>
+          ))}
+        </>
+      )}
 
-      <div className="menu-col">
-        <span className="menu-label">A folder</span>
+      <div className="menu-rule" />
+      {folderOpen ? (
         <form
-          className="folder-form"
+          className="folder-form menu-pad"
           onSubmit={(e) => {
             e.preventDefault();
             const path = folder.trim();
@@ -220,21 +217,37 @@ function DevicesMenu({
             onChange={(e) => setFolder(e.target.value)}
             placeholder="/Volumes/Card"
             aria-label="Folder to scan"
-            disabled={disabled}
+            autoFocus
           />
-          <button type="submit" className="ghost small" disabled={disabled}>
+          <button type="submit" className="secondary small">
             Use
           </button>
         </form>
-        <span className="menu-label spaced">Not seeing a device?</span>
-        <p className="small-text muted">Unlock the phone and tap Trust or Allow.</p>
-        {discovery.hints.map((h) => (
-          <div key={h.text} className="hint">
-            <p className="small-text muted">{h.text}</p>
-            {h.command && <code className="selectable">{h.command}</code>}
-          </div>
-        ))}
-      </div>
+      ) : (
+        <button type="button" role="menuitem" className="menu-link quiet" onClick={() => setFolderOpen(true)}>
+          <span className="menu-link-icon">
+            <Icon name="folder" size={16} />
+            Scan a folder…
+          </span>
+        </button>
+      )}
+
+      {discovery.hints.length > 0 && (
+        <div className="menu-hints">
+          {discovery.hints.map((h) => (
+            <div key={h.text} className="hint">
+              <p className="small-text muted">{h.text}</p>
+              {h.command && <code className="selectable">{h.command}</code>}
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
+}
+
+/** The first clause of a problem, short enough for one menu line. */
+function shortProblem(problem: string): string {
+  const first = problem.split(/[.:]/)[0] ?? problem;
+  return first.length > 48 ? `${first.slice(0, 46)}…` : first;
 }

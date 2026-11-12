@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CloneDone, CloneSheet, RestoreDone, RestoreSheet } from "./components/Clone";
 import { Results } from "./components/Results";
 import { Backups } from "./components/Backups";
-import { ScanPanel, type Stage } from "./components/ScanPanel";
-import { TopBar, type Section } from "./components/TopBar";
+import { NoResults, ScanPanel, type Stage } from "./components/ScanPanel";
+import { TopBar, type DeviceState, type Place } from "./components/TopBar";
 import { AwaitingPhone, TransferPrompt, TransferView, albumFor } from "./components/Transfer";
 import { bytes, count } from "./lib/format";
 import {
@@ -41,8 +41,9 @@ function cloneFor(device: Device, clones: CloneEntry[]): CloneEntry | null {
 }
 
 /**
- * Pick a device on the left, press Scan, and see only what was deleted or
- * damaged on it. Or clone a phone, and move the clone onto a new one.
+ * Choose a device from the switcher, press Scan, and see only what was
+ * deleted or damaged on it. Or clone a phone, and move the clone onto a
+ * new one. Three places, never disabled: Device, Results, Backups.
  *
  * Colour carries state and nothing else: the window is black while idle,
  * amber while Banker works, red once deleted items are on screen, green
@@ -57,8 +58,8 @@ export function App() {
   const [scanned, setScanned] = useState<{ device: Device; summary: ScanSummary } | null>(null);
   const [sheet, setSheet] = useState<{ kind: "clone" | "restore"; device: Device } | null>(null);
   const [offer, setOffer] = useState<{ device: Device; clone: CloneEntry } | null>(null);
-  const [view, setView] = useState<"device" | "backups">("device");
-  const [cloneCount, setCloneCount] = useState(0);
+  const [view, setView] = useState<Place>("device");
+  const [clones, setClones] = useState<CloneEntry[]>([]);
   const seenPhones = useRef<Set<string> | null>(null);
   const declined = useRef<Set<string>>(new Set());
   const stageRef = useRef(stage);
@@ -85,7 +86,7 @@ export function App() {
     try {
       const found = await discover();
       setDiscovery(found);
-      setCloneCount((await listClones().catch(() => [])).length);
+      setClones(await listClones().catch(() => [] as CloneEntry[]));
       // A phone counts as arriving when it is plugged in while Banker is
       // open, or becomes ready (it was waiting for Allow or Trust).
       const ready = found.devices.filter((d) => isPhone(d) && !d.problem);
@@ -132,6 +133,7 @@ export function App() {
       const summary = await scan(device);
       setScanned({ device, summary });
       setStage({ kind: "idle" });
+      setView("results");
     } catch (cause) {
       setStage({ kind: "failed", message: message(cause) });
     }
@@ -186,33 +188,10 @@ export function App() {
     }
   };
 
-  const phoneReady = selected !== null && isPhone(selected) && !selected.problem;
-
-  /** A section in the top bar was chosen. */
-  const openSection = async (section: Section) => {
-    if (section === "backups") {
-      setView("backups");
-      return;
-    }
-    setView("device");
-    if (section === "scan") {
-      if (stage.kind !== "failed") setStage({ kind: "idle" });
-    } else if ((section === "clone" || section === "restore") && selected && phoneReady) {
-      setSheet({ kind: section, device: selected });
-    } else if (section === "transfer") {
-      const clones = await listClones().catch(() => [] as CloneEntry[]);
-      const clone = selected && phoneReady ? cloneFor(selected, clones) : (clones[0] ?? null);
-      if (!clone) {
-        setStage({
-          kind: "failed",
-          message: "There is no clone of another phone on this Mac yet. Clone the old phone first.",
-        });
-      } else if (selected && phoneReady && clone.info.deviceId !== selected.id) {
-        setStage({ kind: "choosing", device: selected, clone });
-      } else {
-        setStage({ kind: "awaiting", clone });
-      }
-    }
+  /** The switcher can only open itself; this nudges people to it. */
+  const chooseDevice = () => {
+    const pill = document.querySelector<HTMLButtonElement>(".switcher");
+    pill?.click();
   };
 
   const working =
@@ -222,18 +201,32 @@ export function App() {
     stage.kind === "transferring";
   const done = stage.kind === "cloned" || stage.kind === "restored" || stage.kind === "transferred";
   const away = stage.kind === "awaiting" || stage.kind === "choosing";
-  const showResults =
-    view === "device" && !working && !done && !away && scanned !== null && scanned.device.id === selected?.id;
-  const active: Section =
-    view === "backups"
-      ? "backups"
-      : stage.kind === "cloning" || stage.kind === "cloned"
-        ? "clone"
-        : stage.kind === "restoring" || stage.kind === "restored"
-          ? "restore"
-          : away || stage.kind === "transferring" || stage.kind === "transferred"
-            ? "transfer"
-            : "scan";
+  const showResults = view === "results" && !working && !done && !away && scanned !== null;
+  const place: Place = working || done || away ? "device" : view;
+  const percent = working && stage.progress?.percent != null ? ` ${stage.progress.percent}%` : "";
+  const deviceState: DeviceState = !selected
+    ? { tone: "none", line: "Nothing chosen yet" }
+    : working && stage.device.id === selected.id
+      ? {
+          tone: "working",
+          line:
+            (stage.kind === "cloning"
+              ? "Cloning"
+              : stage.kind === "restoring"
+                ? "Restoring"
+                : stage.kind === "transferring"
+                  ? "Receiving files"
+                  : "Scanning") + percent,
+        }
+      : stage.kind === "cloned" && stage.device.id === selected.id
+        ? { tone: "saved", line: "Clone saved to this Mac" }
+        : (stage.kind === "restored" || stage.kind === "transferred") && stage.device.id === selected.id
+          ? { tone: "saved", line: stage.kind === "restored" ? "Restore sent" : "Files moved" }
+          : selected.problem
+            ? { tone: "needs", line: "Needs you" }
+            : scanned && scanned.device.id === selected.id && scanned.summary.findings > 0
+              ? { tone: "deleted", line: `${scanned.summary.findings.toLocaleString()} found` }
+              : { tone: "ready", line: selected.kind === "drive" ? "Ready · read in place" : "Ready" };
   const state = working
     ? "working"
     : done
@@ -243,7 +236,16 @@ export function App() {
         : "idle";
 
   const body = () => {
-    if (view === "backups" && !working) {
+    if (view === "results" && !scanned && !working && !done && !away) {
+      return (
+        <NoResults
+          device={selected}
+          onScan={() => selected && void start(selected)}
+          onDevice={() => setView("device")}
+        />
+      );
+    }
+    if (view === "backups" && !working && !done && !away) {
       return (
         <Backups
           finderBackups={discovery.devices.filter((d) => d.kind === "backup")}
@@ -291,9 +293,14 @@ export function App() {
           <ScanPanel
             device={selected}
             stage={stage}
+            clones={clones}
+            lastScan={scanned && scanned.device.id === selected?.id ? scanned.summary : null}
             onScan={(d) => void start(d)}
             onClone={(d) => setSheet({ kind: "clone", device: d })}
             onRestore={(d) => setSheet({ kind: "restore", device: d })}
+            onMove={(d, clone) => setStage({ kind: "choosing", device: d, clone })}
+            onOpenResults={() => setView("results")}
+            onChooseDevice={chooseDevice}
             onCancel={() => void cancelScan()}
           />
         );
@@ -304,34 +311,16 @@ export function App() {
     <div className="shell" data-state={state}>
       <TopBar
         discovery={discovery}
+        clones={clones}
         looking={looking}
         selected={selected}
-        active={active}
-        working={
-          working
-            ? {
-                id: stage.device.id,
-                label:
-                  stage.kind === "cloning"
-                    ? "cloning"
-                    : stage.kind === "restoring"
-                      ? "restoring"
-                      : stage.kind === "transferring"
-                        ? "receiving files"
-                        : "scanning",
-              }
-            : null
-        }
-        foundId={scanned && scanned.summary.findings > 0 ? scanned.device.id : null}
-        disabled={working}
-        unavailable={
-          new Set<Section>([
-            ...(phoneReady ? [] : (["clone", "restore"] as Section[])),
-            // Nothing to transfer until a phone has been cloned.
-            ...(cloneCount === 0 ? (["transfer"] as Section[]) : []),
-          ])
-        }
-        onSection={(section) => void openSection(section)}
+        state={deviceState}
+        place={place}
+        busy={working}
+        onPlace={(p) => {
+          setView(p);
+          if (stage.kind === "failed" || done || away) setStage({ kind: "idle" });
+        }}
         onSelect={(d) => {
           setSelected(d);
           setView("device");
