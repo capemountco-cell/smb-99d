@@ -58,6 +58,7 @@ export function App() {
   const [sheet, setSheet] = useState<{ kind: "clone" | "restore"; device: Device } | null>(null);
   const [offer, setOffer] = useState<{ device: Device; clone: CloneEntry } | null>(null);
   const [view, setView] = useState<"device" | "backups">("device");
+  const [cloneCount, setCloneCount] = useState(0);
   const seenPhones = useRef<Set<string> | null>(null);
   const declined = useRef<Set<string>>(new Set());
   const stageRef = useRef(stage);
@@ -84,6 +85,7 @@ export function App() {
     try {
       const found = await discover();
       setDiscovery(found);
+      setCloneCount((await listClones().catch(() => [])).length);
       // A phone counts as arriving when it is plugged in while Banker is
       // open, or becomes ready (it was waiting for Allow or Trust).
       const ready = found.devices.filter((d) => isPhone(d) && !d.problem);
@@ -322,7 +324,13 @@ export function App() {
         }
         foundId={scanned && scanned.summary.findings > 0 ? scanned.device.id : null}
         disabled={working}
-        unavailable={new Set<Section>(phoneReady ? [] : ["clone", "restore"])}
+        unavailable={
+          new Set<Section>([
+            ...(phoneReady ? [] : (["clone", "restore"] as Section[])),
+            // Nothing to transfer until a phone has been cloned.
+            ...(cloneCount === 0 ? (["transfer"] as Section[]) : []),
+          ])
+        }
         onSection={(section) => void openSection(section)}
         onSelect={(d) => {
           setSelected(d);

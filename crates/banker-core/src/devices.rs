@@ -7,6 +7,7 @@
 //! * Android phones are copied with `adb pull`, then the copy is scanned.
 //! * Existing Finder backups of iPhones can be scanned directly.
 
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -94,8 +95,62 @@ pub fn xml_plist_string(xml: &str, key: &str) -> Option<String> {
     Some(rest[open..open + close].replace("&amp;", "&"))
 }
 
-/// Mounted drives under `volumes`, leaving out the Mac's own disk.
-pub fn drives(volumes: &Path) -> Vec<Device> {
+/// Mount points of disk images (`.dmg` installers and the like) from
+/// `hdiutil info`. These sit in /Volumes beside real drives but are not
+/// devices anyone wants to recover from.
+pub fn parse_disk_image_mounts(hdiutil_info: &str) -> HashSet<PathBuf> {
+    hdiutil_info
+        .lines()
+        .filter_map(|line| {
+            line.split('\t')
+                .map(str::trim)
+                .find(|t| t.starts_with("/Volumes/"))
+        })
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// iPhones and iPads plugged in by USB, from `ioreg -p IOUSB -l -w 0`, as
+/// (product, UDID). macOS sees them even when libimobiledevice is missing,
+/// so Banker can say what is needed instead of not listing the phone.
+pub fn parse_usb_apple_devices(ioreg: &str) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    let mut product: Option<String> = None;
+    let mut serial: Option<String> = None;
+    let value = |line: &str| {
+        line.split_once('=')
+            .map(|(_, v)| v.trim().trim_matches('"').to_string())
+    };
+    let mut flush = |product: &mut Option<String>, serial: &mut Option<String>| {
+        if let (Some(p), Some(s)) = (product.take(), serial.take()) {
+            if matches!(p.as_str(), "iPhone" | "iPad" | "iPod") {
+                // Newer devices report a 24-digit serial; their UDID has a
+                // dash after the first eight.
+                let udid = if s.len() == 24 && !s.contains('-') {
+                    format!("{}-{}", &s[..8], &s[8..])
+                } else {
+                    s
+                };
+                found.push((p, udid));
+            }
+        }
+    };
+    for line in ioreg.lines() {
+        if line.contains("+-o ") {
+            flush(&mut product, &mut serial);
+        } else if line.contains("\"USB Product Name\"") {
+            product = value(line);
+        } else if line.contains("\"USB Serial Number\"") {
+            serial = value(line);
+        }
+    }
+    flush(&mut product, &mut serial);
+    found
+}
+
+/// Mounted drives under `volumes`, leaving out the Mac's own disk and the
+/// disk images in `images`.
+pub fn drives(volumes: &Path, images: &HashSet<PathBuf>) -> Vec<Device> {
     let Ok(entries) = std::fs::read_dir(volumes) else {
         return Vec::new();
     };
@@ -104,7 +159,11 @@ pub fn drives(volumes: &Path) -> Vec<Device> {
         .filter_map(|e| {
             let path = e.path();
             let real = std::fs::canonicalize(&path).ok()?;
-            if real == Path::new("/") || !real.is_dir() {
+            if real == Path::new("/")
+                || !real.is_dir()
+                || images.contains(&path)
+                || images.contains(&real)
+            {
                 return None;
             }
             let name = e.file_name().to_string_lossy().into_owned();
@@ -172,12 +231,31 @@ pub(crate) fn output(tool: &Path, args: &[&str]) -> Option<String> {
 /// Everything connected or available right now.
 pub fn discover(home: &Path) -> Discovery {
     let mut d = Discovery::default();
-    d.devices.extend(drives(Path::new("/Volumes")));
+    let images = Path::new("/usr/bin/hdiutil")
+        .is_file()
+        .then(|| output(Path::new("/usr/bin/hdiutil"), &["info"]))
+        .flatten()
+        .map(|o| parse_disk_image_mounts(&o))
+        .unwrap_or_default();
+    d.devices.extend(drives(Path::new("/Volumes"), &images));
+    let usb_apple = Path::new("/usr/sbin/ioreg")
+        .is_file()
+        .then(|| {
+            output(
+                Path::new("/usr/sbin/ioreg"),
+                &["-p", "IOUSB", "-l", "-w", "0"],
+            )
+        })
+        .flatten()
+        .map(|o| parse_usb_apple_devices(&o))
+        .unwrap_or_default();
+    let has_brew = find_tool("brew").is_some();
 
-    match find_tool("idevice_id") {
-        Some(tool) => {
+    let idevice = find_tool("idevice_id");
+    match idevice {
+        Some(ref tool) => {
             let info = find_tool("ideviceinfo");
-            for udid in parse_idevice_ids(&output(&tool, &["-l"]).unwrap_or_default()) {
+            for udid in parse_idevice_ids(&output(tool, &["-l"]).unwrap_or_default()) {
                 let name = info
                     .as_ref()
                     .and_then(|i| output(i, &["-u", &udid, "-k", "DeviceName"]))
@@ -195,9 +273,32 @@ pub fn discover(home: &Path) -> Discovery {
             }
         }
         None => d.hints.push(ToolHint {
-            text: "To back up iPhones and iPads over USB, install libimobiledevice:".into(),
+            text: if has_brew {
+                "To read iPhones and iPads, install libimobiledevice. In Terminal:".into()
+            } else {
+                "To read iPhones and iPads, install Homebrew from brew.sh, then in Terminal:".into()
+            },
             command: Some("brew install libimobiledevice".into()),
         }),
+    }
+    // A phone macOS sees on USB but Banker cannot read yet: list it, with
+    // what to do, rather than leaving it out.
+    for (product, udid) in usb_apple {
+        if d.devices.iter().any(|x| x.id == udid) {
+            continue;
+        }
+        d.devices.push(Device {
+            id: udid,
+            kind: DeviceKind::Iphone,
+            name: product.clone(),
+            detail: format!("{product} · connected by USB"),
+            path: None,
+            problem: Some(if idevice.is_none() {
+                format!("Banker needs libimobiledevice to read this {product}. See \"Not seeing a device?\".")
+            } else {
+                format!("Unlock the {product} and tap Trust, then wait a few seconds.")
+            }),
+        });
     }
 
     match find_tool("adb") {
@@ -490,8 +591,16 @@ mod tests {
         std::fs::create_dir_all(dir.join("USB STICK")).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink("/", dir.join("Macintosh HD")).unwrap();
-        let names: Vec<_> = drives(&dir).into_iter().map(|d| d.name).collect();
+        let names: Vec<_> = drives(&dir, &HashSet::new())
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
         assert_eq!(names, vec!["USB STICK"]);
+
+        std::fs::create_dir_all(dir.join("Some Installer")).unwrap();
+        let images: HashSet<PathBuf> = [dir.join("Some Installer")].into_iter().collect();
+        let names: Vec<_> = drives(&dir, &images).into_iter().map(|d| d.name).collect();
+        assert_eq!(names, vec!["USB STICK"], "disk images are not drives");
     }
 
     #[test]
@@ -504,6 +613,37 @@ mod tests {
         let kept = android_pull_outcome(Err("adb: error: Permission denied".into()), &dir);
         assert!(kept.unwrap().unwrap().contains("could not be copied"));
         assert!(android_pull_outcome(Err("Stopped.".into()), &dir).is_err());
+    }
+
+    #[test]
+    fn finds_disk_image_mounts() {
+        let info = "framework       : 666\n================================================\n\
+                    image-path      : /Users/me/Downloads/Banker.dmg\n\
+                    /dev/disk4\tGUID_partition_scheme\t\n\
+                    /dev/disk4s1\tApple_HFS\t/Volumes/Banker\n\
+                    /dev/disk5s1\tApple_HFS\t/Volumes/Adobe Illustrator 2020 v24.0.1\n";
+        let mounts = parse_disk_image_mounts(info);
+        assert!(mounts.contains(Path::new("/Volumes/Banker")));
+        assert!(mounts.contains(Path::new("/Volumes/Adobe Illustrator 2020 v24.0.1")));
+        assert_eq!(mounts.len(), 2);
+    }
+
+    #[test]
+    fn finds_iphones_on_usb() {
+        let ioreg = "+-o Root  <class IORegistryEntry>\n\
+                       +-o iPhone@01100000  <class IOUSBHostDevice>\n\
+                         |   \"USB Product Name\" = \"iPhone\"\n\
+                         |   \"USB Serial Number\" = \"00008030001A2B3C4D5E802E\"\n\
+                       +-o USB Keyboard@02100000  <class IOUSBHostDevice>\n\
+                         |   \"USB Product Name\" = \"USB Keyboard\"\n\
+                         |   \"USB Serial Number\" = \"123\"\n";
+        assert_eq!(
+            parse_usb_apple_devices(ioreg),
+            vec![(
+                "iPhone".to_string(),
+                "00008030-001A2B3C4D5E802E".to_string()
+            )]
+        );
     }
 
     #[test]

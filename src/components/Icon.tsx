@@ -24,8 +24,8 @@ const PATHS = {
   ),
   drive: (
     <>
-      <path d="M6 3h9l4 4v14H6z" />
-      <path d="M9 3v4M12 3v4M15 3v4" />
+      <rect x="3" y="7" width="18" height="10" rx="2.5" />
+      <path d="M7 12h.01M11 12h6" />
     </>
   ),
   folder: <path d="M3 7h6l2 2h10v10H3z" />,

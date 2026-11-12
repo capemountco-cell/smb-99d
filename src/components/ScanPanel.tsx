@@ -34,11 +34,28 @@ const CAPTION: Record<Device["kind"], string> = {
   android: "Copies to this Mac first · changes nothing on the phone",
 };
 
-const FEATURES: { icon: IconName; label: string }[] = [
+type Feature = { icon: IconName; label: string };
+const PHONE_FEATURES: Feature[] = [
   { icon: "photo", label: "Deleted photos and videos" },
   { icon: "message", label: "Deleted messages, app by app" },
   { icon: "damaged", label: "Damaged files that won't open" },
 ];
+const DRIVE_FEATURES: Feature[] = [
+  { icon: "trash", label: "Files in its trash folders" },
+  { icon: "database", label: "Deleted records in app data" },
+  { icon: "damaged", label: "Damaged files that won't open" },
+];
+/** What a scan finds, worded for the kind of device. */
+const FEATURES: Record<Device["kind"], Feature[]> = {
+  iphone: PHONE_FEATURES,
+  android: PHONE_FEATURES,
+  backup: PHONE_FEATURES,
+  drive: DRIVE_FEATURES,
+  folder: DRIVE_FEATURES,
+};
+
+/** Long names step down in size so they never run edge to edge. */
+const titleSize = (name: string) => (name.length > 32 ? "xl long" : name.length > 20 ? "xl longish" : "xl");
 
 type Step = { label: string; state: "done" | "now" | "next" };
 
@@ -167,7 +184,7 @@ export function ScanPanel({ device, stage, onScan, onClone, onRestore, onCancel 
   return (
     <div className="hero">
       <p className="eyebrow">{device.detail}</p>
-      <h1 className="display xl">{device.name}</h1>
+      <h1 className={`display ${titleSize(device.name)}`}>{device.name}</h1>
       <p className="lede big narrow">
         Everything that was deleted from it, and anything damaged, on a timeline down to the minute.
       </p>
@@ -208,7 +225,7 @@ export function ScanPanel({ device, stage, onScan, onClone, onRestore, onCancel 
       </div>
       <p className="muted small-text">{CAPTION[device.kind]}</p>
       <ul className="features">
-        {FEATURES.map((f) => (
+        {FEATURES[device.kind].map((f) => (
           <li key={f.label}>
             <span className="tile">
               <Icon name={f.icon} />
