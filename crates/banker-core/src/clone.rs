@@ -337,24 +337,27 @@ fn entry(folder: &Path, info: CloneInfo) -> CloneEntry {
     }
 }
 
-/// A folder the window names, checked to be a clone directly inside
-/// `~/Banker Backups`, so no other folder can be read through it.
+/// A folder the window names, checked to be a clone directly inside one of
+/// Banker's save folders, so no other folder can be read through it.
 pub fn clone_folder(home: &Path, folder: &str) -> Result<PathBuf, String> {
     let not = || format!("{folder} is not a Banker clone.");
-    let root = fs::canonicalize(home.join("Banker Backups")).map_err(|_| not())?;
     let folder = fs::canonicalize(folder).map_err(|_| not())?;
-    if folder.parent() != Some(root.as_path()) || !folder.join(INFO_FILE).is_file() {
+    let inside = crate::settings::known_roots(home)
+        .iter()
+        .filter_map(|r| fs::canonicalize(r).ok())
+        .any(|root| folder.parent() == Some(root.as_path()));
+    if !inside || !folder.join(INFO_FILE).is_file() {
         return Err(not());
     }
     Ok(folder)
 }
 
-/// Every clone in `~/Banker Backups`, newest first.
+/// Every clone in Banker's save folders, newest first.
 pub fn list_clones(home: &Path) -> Vec<CloneEntry> {
-    let Ok(dirs) = fs::read_dir(home.join("Banker Backups")) else {
-        return Vec::new();
-    };
-    let mut clones: Vec<CloneEntry> = dirs
+    let mut clones: Vec<CloneEntry> = crate::settings::known_roots(home)
+        .iter()
+        .filter_map(|root| fs::read_dir(root).ok())
+        .flatten()
         .filter_map(Result::ok)
         .filter_map(|d| {
             let folder = d.path();
@@ -378,7 +381,14 @@ pub fn clone_device(
     progress: &mut dyn FnMut(&Progress),
 ) -> Result<CloneEntry, String> {
     let local = now + tz_offset_minutes as i64 * 60;
-    let folder = backup_folder(home, &format!("{} clone", device.name), local);
+    let root = crate::settings::save_root(home)?;
+    crate::settings::check_space(
+        &root,
+        &format!("a clone of {}", device.name),
+        crate::devices::phone_used_bytes(device),
+        0,
+    )?;
+    let folder = backup_folder(&root, &format!("{} clone", device.name), local);
     let backup = folder.join(BACKUP_DIR);
     fs::create_dir_all(&backup)
         .map_err(|e| format!("Could not create {}: {e}", backup.display()))?;

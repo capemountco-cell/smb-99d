@@ -17,6 +17,7 @@ pub mod model;
 pub mod paths;
 pub mod preview;
 pub mod scan;
+pub mod settings;
 pub mod sqlite;
 pub mod timeline;
 pub mod transfer;

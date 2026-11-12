@@ -438,8 +438,9 @@ pub fn discover(home: &Path) -> Discovery {
     d
 }
 
-/// `~/Banker Backups/<name> <YYYY-MM-DD HH.MM>`
-pub fn backup_folder(home: &Path, device_name: &str, now_local: i64) -> PathBuf {
+/// `<save root>/<name> <YYYY-MM-DD HH.MM>`, the save root being
+/// `~/Banker Backups` or the folder chosen in settings.
+pub fn backup_folder(root: &Path, device_name: &str, now_local: i64) -> PathBuf {
     let (y, m, d) = civil_from_days(now_local.div_euclid(86_400));
     let secs = now_local.rem_euclid(86_400);
     let safe: String = device_name
@@ -452,7 +453,7 @@ pub fn backup_folder(home: &Path, device_name: &str, now_local: i64) -> PathBuf 
             }
         })
         .collect();
-    home.join("Banker Backups").join(format!(
+    root.join(format!(
         "{safe} {y}-{m:02}-{d:02} {:02}.{:02}",
         secs / 3600,
         secs % 3600 / 60
@@ -550,6 +551,45 @@ pub fn last_percent(output: &str) -> Option<u8> {
     None
 }
 
+/// idevicebackup2's failure, in words the person can act on.
+pub fn backup_error(raw: &str) -> String {
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("105") || lower.contains("insufficient free disk space") {
+        "Not enough space to copy the iPhone. Choose another Save to location (an external drive works) under Backups, or free up space, then try again.".into()
+    } else if lower.contains("passcode") || lower.contains("locked") {
+        "The iPhone is locked. Unlock it, keep it unlocked, and try again.".into()
+    } else {
+        format!("Backing up the iPhone failed: {raw}")
+    }
+}
+
+/// How much is stored on a phone, to check a copy will fit before starting.
+pub fn phone_used_bytes(device: &Device) -> Option<u64> {
+    match device.kind {
+        DeviceKind::Iphone => {
+            let info = find_tool("ideviceinfo")?;
+            let read = |key: &str| -> Option<u64> {
+                output(
+                    &info,
+                    &["-u", &device.id, "-q", "com.apple.disk_usage", "-k", key],
+                )?
+                .trim()
+                .parse()
+                .ok()
+            };
+            Some(read("TotalDataCapacity")?.saturating_sub(read("TotalDataAvailable")?))
+        }
+        DeviceKind::Android => {
+            let adb = find_tool("adb")?;
+            let df = output(&adb, &["-s", &device.id, "shell", "df", "-k", "/sdcard"])?;
+            let line = df.lines().rev().find(|l| !l.trim().is_empty())?;
+            let used_kb: u64 = line.split_whitespace().nth(2)?.parse().ok()?;
+            Some(used_kb * 1024)
+        }
+        _ => None,
+    }
+}
+
 /// Make sure the iPhone trusts this Mac, asking it to if not.
 pub(crate) fn pair_iphone(udid: &str, log_dir: &Path, cancel: &AtomicBool) -> Result<(), String> {
     let pair = find_tool("idevicepair").ok_or("Install libimobiledevice first.")?;
@@ -628,13 +668,15 @@ pub fn copy_to_mac(
             let backup = find_tool("idevicebackup2").ok_or("Install libimobiledevice first.")?;
             pair_iphone(&device.id, dest, cancel)?;
             let target = dest.display().to_string();
-            run(
-                &backup,
-                &["-u", &device.id, "backup", "--full", &target],
-                dest,
-                cancel,
-            )
-            .map_err(|e| format!("Backing up the iPhone failed: {e}"))?;
+            // A backup already there is brought up to date: only what changed
+            // on the phone is copied, which is faster and needs no new space.
+            let fresh = !dest.join(&device.id).join("Manifest.db").is_file();
+            let mut args = vec!["-u", device.id.as_str(), "backup"];
+            if fresh {
+                args.push("--full");
+            }
+            args.push(&target);
+            run(&backup, &args, dest, cancel).map_err(|e| backup_error(&e))?;
             Ok((dest.join(&device.id), None))
         }
     }
@@ -802,10 +844,21 @@ mod tests {
     }
 
     #[test]
+    fn explains_backup_failures() {
+        let e = backup_error(
+            "ErrorCode 105: Insufficient free disk space on drive to back up (MBErrorDomain/105)",
+        );
+        assert!(e.contains("Not enough space"));
+        assert!(e.contains("Save to"));
+        assert!(backup_error("Device is locked with a passcode").contains("Unlock"));
+        assert!(backup_error("odd").contains("odd"));
+    }
+
+    #[test]
     fn backup_folder_is_dated() {
         let t = crate::timeline::days_from_civil(2026, 11, 11) * 86_400 + 9 * 3600 + 5 * 60;
         assert_eq!(
-            backup_folder(Path::new("/Users/me"), "Sam's iPhone", t),
+            backup_folder(Path::new("/Users/me/Banker Backups"), "Sam's iPhone", t),
             PathBuf::from("/Users/me/Banker Backups/Sam's iPhone 2026-11-11 09.05")
         );
     }

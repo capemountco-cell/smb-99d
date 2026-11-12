@@ -7,8 +7,10 @@ import {
   type CloneEntry,
   type CloneOptions,
   type Device,
+  type Location,
 } from "../lib/native";
 import { Icon } from "./Icon";
+import { SaveTo } from "./SaveTo";
 
 function Sheet({
   title,
@@ -42,10 +44,14 @@ function Sheet({
 /** What a clone holds, before it starts. */
 export function CloneSheet({
   device,
+  location,
+  onLocation,
   onStart,
   onClose,
 }: {
   device: Device;
+  location: Location | null;
+  onLocation: (location: Location) => void;
   onStart: (options: CloneOptions) => void;
   onClose: () => void;
 }) {
@@ -147,10 +153,12 @@ export function CloneSheet({
         </p>
       )}
 
+      <SaveTo location={location} onChange={onLocation} />
+
       <button
         type="button"
         className="primary wide-button"
-        disabled={!ready}
+        disabled={!ready || location?.available === false}
         onClick={() => onStart({ password: needsPassword ? password : null, makeZip: zip })}
       >
         Clone this device

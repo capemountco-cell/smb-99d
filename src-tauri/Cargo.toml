@@ -19,6 +19,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 # protocol-asset: previews read the exact files the user opens (see `preview`).
 tauri = { version = "2", features = ["protocol-asset"] }
+# The "Save to" location is chosen in a standard macOS folder picker.
+tauri-plugin-dialog = "2"
 
 [features]
 # Turned on by `tauri build`. Serves the bundled frontend instead of devUrl.

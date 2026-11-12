@@ -1,7 +1,19 @@
 import { count } from "../lib/format";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import type { CloneEntry, Device, Progress, ScanSummary, Transferred } from "../lib/native";
+import { bytes } from "../lib/format";
+import {
+  deleteScanCopy,
+  scanCopy,
+  type CloneEntry,
+  type Device,
+  type Location,
+  type Progress,
+  type ScanCopy,
+  type ScanSummary,
+  type Transferred,
+} from "../lib/native";
+import { SaveTo } from "./SaveTo";
 import { Icon, type IconName } from "./Icon";
 
 export type Stage =
@@ -32,14 +44,16 @@ interface Props {
   onOpenResults: () => void;
   onChooseDevice: () => void;
   onCancel: () => void;
+  location: Location | null;
+  onLocation: (location: Location) => void;
 }
 
 const CAPTION: Record<Device["kind"], string> = {
   drive: "Banker reads the drive where it is and changes nothing on it",
   folder: "Banker reads the folder where it is and changes nothing in it",
   backup: "Banker reads this backup and changes nothing",
-  iphone: "Banker backs it up to this Mac first, and nothing on the phone changes",
-  android: "Banker copies it to this Mac first, and nothing on the phone changes",
+  iphone: "Banker copies it to your Save to location first, and nothing on the phone changes",
+  android: "Banker copies it to your Save to location first, and nothing on the phone changes",
 };
 
 type Feature = { icon: IconName; label: string };
@@ -186,6 +200,21 @@ const KIND_NAME: Record<Device["kind"], string> = {
 export function ScanPanel(props: Props) {
   const { device, stage, clones, lastScan, onScan, onCancel } = props;
   const [notice, setNotice] = useState<string | null>(null);
+  const [copy, setCopy] = useState<ScanCopy | null>(null);
+  const phoneId = device && (device.kind === "iphone" || device.kind === "android") ? device.id : null;
+
+  // The phone's scan copy, if one is kept: shown with a way to delete it.
+  useEffect(() => {
+    setCopy(null);
+    if (!device || !phoneId) return;
+    let live = true;
+    scanCopy(device)
+      .then((c) => live && setCopy(c))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [phoneId, lastScan, props.location?.path]);
 
   if (
     stage.kind === "scanning" ||
@@ -233,7 +262,7 @@ export function ScanPanel(props: Props) {
         {
           icon: "copy",
           title: "Clone this phone",
-          line: blocked ?? "A full copy on this Mac that can restore it, or set up a new phone.",
+          line: blocked ?? "A full copy, on your Save to location, that can restore it or set up a new phone.",
           ready: !needs,
           run: () => props.onClone(device),
         },
@@ -290,6 +319,9 @@ export function ScanPanel(props: Props) {
             </button>
           )}
         </div>
+        {phone && (
+          <SaveTo location={props.location} onChange={props.onLocation} compact />
+        )}
         <div className="stat-tiles">
           <div className="stat">
             <strong>{lastScan ? lastScan.findings.toLocaleString() : "—"}</strong>
@@ -299,11 +331,37 @@ export function ScanPanel(props: Props) {
             <strong>{phone ? own.length || "None" : KIND_NAME[device.kind]}</strong>
             <span>{phone ? `${own.length === 1 ? "Clone" : "Clones"} of this phone` : "Kind"}</span>
           </div>
-          <div className="stat">
-            <strong>{lastScan ? lastScan.filesChecked.toLocaleString() : "—"}</strong>
-            <span>Files checked</span>
-          </div>
+          {phone ? (
+            <div className="stat">
+              <strong>{copy ? bytes(copy.bytes) : "None"}</strong>
+              <span>Scan copy on {props.location?.label ?? "this Mac"}</span>
+              {copy && (
+                <button
+                  type="button"
+                  className="stat-action"
+                  onClick={() =>
+                    void deleteScanCopy(device)
+                      .then(() => setCopy(null))
+                      .catch((e) => setNotice(String(e)))
+                  }
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="stat">
+              <strong>{lastScan ? lastScan.filesChecked.toLocaleString() : "—"}</strong>
+              <span>Files checked</span>
+            </div>
+          )}
         </div>
+        {phone && (
+          <p className="small-text muted">
+            Apple only lets an iPhone be read through a backup, so a scan copies the phone to the
+            Save to location first. The copy is reused next time, and only what changed is added.
+          </p>
+        )}
       </section>
 
       <section className="home-side" aria-label={phone ? "More for this phone" : "What a scan finds"}>

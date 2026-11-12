@@ -9,11 +9,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
-use crate::devices::{backup_folder, copy_to_mac, Device, DeviceKind};
+use crate::devices::{copy_to_mac, phone_used_bytes, Device, DeviceKind};
 use crate::integrity;
 use crate::ios::{self, Manifest};
 use crate::model::{media_for_name, Finding, Media, Report, Source, Status};
 use crate::paths::{app_for_ios, app_for_path, trashed};
+use crate::settings::{check_space, folder_size, save_root};
 use crate::sqlite::{self, Db};
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -450,8 +451,34 @@ impl Scanner<'_> {
     }
 }
 
-/// Everything one press of Scan does: copy a phone to the Mac when needed
-/// (into `~/Banker Backups/...`), then scan the copy or the drive.
+/// Where a phone's scan copy lives: one folder per phone, reused by every
+/// scan of it, so a second scan only adds what changed.
+pub fn scan_copy_dir(root: &Path, device: &Device) -> PathBuf {
+    let safe: String = device
+        .name
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | ':' | '\\') {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let tail: String = device
+        .id
+        .chars()
+        .rev()
+        .take(6)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    root.join("Scan copies").join(format!("{safe} {tail}"))
+}
+
+/// Everything one press of Scan does: copy a phone to the Save to location
+/// when needed (checking first that it fits), then scan the copy or the drive.
 pub fn scan_device(
     device: &Device,
     home: &Path,
@@ -462,8 +489,16 @@ pub fn scan_device(
     progress: &mut dyn FnMut(&Progress),
 ) -> Result<Report, String> {
     let copies = matches!(device.kind, DeviceKind::Iphone | DeviceKind::Android);
+    let _ = tz_offset_minutes;
     let folder = if copies {
-        let dest = backup_folder(home, &device.name, now + tz_offset_minutes as i64 * 60);
+        let root = save_root(home)?;
+        let dest = scan_copy_dir(&root, device);
+        check_space(
+            &root,
+            &format!("the scan copy of {}", device.name),
+            phone_used_bytes(device),
+            folder_size(&dest),
+        )?;
         progress(&Progress {
             phase: match device.kind {
                 DeviceKind::Iphone => "Backing up the iPhone to this Mac (keep it unlocked)",
@@ -490,7 +525,7 @@ pub fn scan_device(
     }
     if copies {
         report.note(format!(
-            "A copy of the phone was saved in {}.",
+            "The scan copy is kept in {} so previews and saving work. The next scan of this phone reuses it. Delete it under Backups when you are done.",
             folder.display()
         ));
     }

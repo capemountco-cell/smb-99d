@@ -12,6 +12,7 @@ import {
   cloneDevice,
   cloneGroups,
   discover,
+  getLocation,
   listClones,
   nativeAvailable,
   onProgress,
@@ -22,6 +23,7 @@ import {
   type CloneOptions,
   type Device,
   type Discovery,
+  type Location,
   type ScanSummary,
   type Selection,
 } from "./lib/native";
@@ -60,6 +62,7 @@ export function App() {
   const [offer, setOffer] = useState<{ device: Device; clone: CloneEntry } | null>(null);
   const [view, setView] = useState<Place>("device");
   const [clones, setClones] = useState<CloneEntry[]>([]);
+  const [location, setLoc] = useState<Location | null>(null);
   const seenPhones = useRef<Set<string> | null>(null);
   const declined = useRef<Set<string>>(new Set());
   const stageRef = useRef(stage);
@@ -87,6 +90,7 @@ export function App() {
       const found = await discover();
       setDiscovery(found);
       setClones(await listClones().catch(() => [] as CloneEntry[]));
+      setLoc(await getLocation().catch(() => null));
       // A phone counts as arriving when it is plugged in while Banker is
       // open, or becomes ready (it was waiting for Allow or Trust).
       const ready = found.devices.filter((d) => isPhone(d) && !d.problem);
@@ -248,6 +252,8 @@ export function App() {
     if (view === "backups" && !working && !done && !away) {
       return (
         <Backups
+          location={location}
+          onLocation={setLoc}
           finderBackups={discovery.devices.filter((d) => d.kind === "backup")}
           onScan={(d) => void start(d)}
           onTransfer={(clone) => transferFrom(clone)}
@@ -299,6 +305,8 @@ export function App() {
             onClone={(d) => setSheet({ kind: "clone", device: d })}
             onRestore={(d) => setSheet({ kind: "restore", device: d })}
             onMove={(d, clone) => setStage({ kind: "choosing", device: d, clone })}
+            location={location}
+            onLocation={setLoc}
             onOpenResults={() => setView("results")}
             onChooseDevice={chooseDevice}
             onCancel={() => void cancelScan()}
@@ -356,6 +364,8 @@ export function App() {
         {sheet?.kind === "clone" && (
           <CloneSheet
             device={sheet.device}
+            location={location}
+            onLocation={setLoc}
             onStart={(options) => void startClone(sheet.device, options)}
             onClose={() => setSheet(null)}
           />

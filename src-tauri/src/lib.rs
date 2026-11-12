@@ -17,6 +17,7 @@ use banker_core::devices::{Device, Discovery};
 use banker_core::export::Exported;
 use banker_core::preview::{CardPreview, Preview};
 use banker_core::scan::Progress;
+use banker_core::settings::Location;
 use banker_core::timeline::{Query, QueryResult};
 use banker_core::transfer::{Group, Item, Selection, Transferred};
 use banker_core::Report;
@@ -217,6 +218,51 @@ async fn transfer_clone(
 }
 
 #[tauri::command]
+async fn get_location() -> Result<Location, String> {
+    blocking(|| Ok(banker_core::settings::location(&home()))).await
+}
+
+/// Choose where scan copies, clones and saved items go; None for the default.
+#[tauri::command]
+async fn set_location(folder: Option<String>) -> Result<Location, String> {
+    blocking(move || banker_core::settings::set_save_to(&home(), folder.as_deref())).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScanCopy {
+    path: String,
+    bytes: u64,
+}
+
+/// The scan copy of a phone, if one is kept.
+#[tauri::command]
+async fn scan_copy(device: Device) -> Result<Option<ScanCopy>, String> {
+    blocking(move || {
+        let Ok(root) = banker_core::settings::save_root(&home()) else {
+            return Ok(None);
+        };
+        let dir = banker_core::scan::scan_copy_dir(&root, &device);
+        Ok(dir.is_dir().then(|| ScanCopy {
+            bytes: banker_core::settings::folder_size(&dir),
+            path: dir.display().to_string(),
+        }))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn delete_scan_copy(device: Device) -> Result<(), String> {
+    blocking(move || {
+        let root = banker_core::settings::save_root(&home())?;
+        let dir = banker_core::scan::scan_copy_dir(&root, &device);
+        std::fs::remove_dir_all(&dir)
+            .map_err(|e| format!("Could not delete {}: {e}", dir.display()))
+    })
+    .await
+}
+
+#[tauri::command]
 fn cancel_scan(session: State<'_, Session>) {
     session.cancel.store(true, Ordering::Relaxed);
 }
@@ -289,6 +335,7 @@ fn reveal(path: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(Session::default())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // The phone tools bundled inside the app (scripts/bundle-tools.sh).
             // The core looks there before PATH and Homebrew.
@@ -301,6 +348,10 @@ pub fn run() {
             discover,
             scan,
             cancel_scan,
+            get_location,
+            set_location,
+            scan_copy,
+            delete_scan_copy,
             clone_device,
             list_clones,
             restore_clone,

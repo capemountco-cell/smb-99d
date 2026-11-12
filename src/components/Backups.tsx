@@ -1,15 +1,20 @@
 import { useEffect, useState } from "react";
 
 import { bytes, count, DEVICE_ICON } from "../lib/format";
-import { listClones, reveal, type CloneEntry, type Device } from "../lib/native";
+import { listClones, reveal, type CloneEntry, type Device, type Location } from "../lib/native";
 import { Icon } from "./Icon";
+import { SaveTo } from "./SaveTo";
 
 /** Every clone and Finder backup on this Mac, with what can be done with each. */
 export function Backups({
+  location,
+  onLocation,
   finderBackups,
   onScan,
   onTransfer,
 }: {
+  location: Location | null;
+  onLocation: (location: Location) => void;
   finderBackups: Device[];
   onScan: (device: Device) => void;
   onTransfer: (clone: CloneEntry) => void;
@@ -25,11 +30,12 @@ export function Backups({
     <div className="page">
       <div className="headline">
         <h1 className="display">Backups</h1>
-        <p className="lede">Clones made with Banker and iPhone backups Finder made, all on this Mac.</p>
+        <p className="lede">Clones made with Banker and iPhone backups Finder made.</p>
       </div>
+      <SaveTo location={location} onChange={onLocation} />
 
       {clones !== null && clones.length === 0 && finderBackups.length === 0 && (
-        <p className="empty">Nothing yet. Pick a phone under Devices and use Clone.</p>
+        <p className="empty">Nothing yet. Choose a phone in the switcher at the top right and use Clone this phone.</p>
       )}
 
       <div className="backup-list">

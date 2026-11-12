@@ -237,8 +237,8 @@ pub fn export(
     Ok(out)
 }
 
-/// Save every finding that matches `q` into a new, dated folder in
-/// `~/Banker Backups`.
+/// Save every finding that matches `q` into a new, dated folder in the Save
+/// to location.
 pub fn export_matching(
     report: &crate::model::Report,
     q: &crate::timeline::Query,
@@ -251,8 +251,9 @@ pub fn export_matching(
     };
     let result = crate::timeline::query(&report.findings, &all);
     let picked: Vec<&Finding> = result.items.iter().collect();
+    let root = crate::settings::save_root(home).map_err(std::io::Error::other)?;
     let dest =
-        crate::devices::backup_folder(home, "Recovered", now + q.tz_offset_minutes as i64 * 60);
+        crate::devices::backup_folder(&root, "Recovered", now + q.tz_offset_minutes as i64 * 60);
     export(&picked, &dest, q.tz_offset_minutes)
 }
 

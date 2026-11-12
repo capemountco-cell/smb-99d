@@ -6,6 +6,7 @@
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 
 export type Status = "deleted" | "corrupt";
 export type Source =
@@ -194,6 +195,19 @@ export interface Transferred {
   notes: string[];
 }
 
+export interface Location {
+  path: string;
+  label: string;
+  freeBytes: number | null;
+  available: boolean;
+  isDefault: boolean;
+}
+
+export interface ScanCopy {
+  path: string;
+  bytes: number;
+}
+
 export interface Exported {
   folder: string;
   files: number;
@@ -220,6 +234,17 @@ export const discover = () => call<Discovery>("discover");
 export const scan = (device: Device) =>
   call<ScanSummary>("scan", { device, tzOffsetMinutes: localOffsetMinutes() });
 export const cancelScan = () => call<void>("cancel_scan");
+export const getLocation = () => call<Location>("get_location");
+export const setLocation = (folder: string | null) => call<Location>("set_location", { folder });
+export const scanCopy = (device: Device) => call<ScanCopy | null>("scan_copy", { device });
+export const deleteScanCopy = (device: Device) => call<void>("delete_scan_copy", { device });
+
+/** Ask for a folder in the standard macOS picker; null if cancelled. */
+export async function chooseFolder(): Promise<string | null> {
+  if (!nativeAvailable()) return null;
+  const picked = await open({ directory: true, multiple: false, title: "Choose where Banker saves copies" });
+  return typeof picked === "string" ? picked : null;
+}
 export const cloneDevice = (device: Device, options: CloneOptions) =>
   call<CloneEntry>("clone_device", { device, options, tzOffsetMinutes: localOffsetMinutes() });
 export const listClones = () => call<CloneEntry[]>("list_clones");
