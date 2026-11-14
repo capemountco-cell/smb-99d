@@ -3,7 +3,7 @@ import { chooseFolder, setLocation, type Location } from "../lib/native";
 import { Icon } from "./Icon";
 
 /**
- * Where Banker saves scan copies, clones and saved items, with the free
+ * Where Reco saves scan copies, clones and saved items, with the free
  * space there and a way to change it (an external drive, for example).
  */
 export function SaveTo({

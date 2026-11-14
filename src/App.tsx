@@ -3,7 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CloneDone, CloneSheet, RestoreDone, RestoreSheet } from "./components/Clone";
 import { Results } from "./components/Results";
 import { Backups } from "./components/Backups";
-import { NoResults, ScanPanel, type Stage } from "./components/ScanPanel";
+import { Home, ScanningView } from "./components/Home";
+import { Photos } from "./components/Photos";
+import { NoResults, ScanPanel, WorkingView, type Stage } from "./components/ScanPanel";
 import { TopBar, type DeviceState, type Place } from "./components/TopBar";
 import { AwaitingPhone, TransferPrompt, TransferView, albumFor } from "./components/Transfer";
 import { bytes, count } from "./lib/format";
@@ -21,6 +23,7 @@ import {
   transferClone,
   type CloneEntry,
   type CloneOptions,
+  type Depth,
   type Device,
   type Discovery,
   type Location,
@@ -42,15 +45,18 @@ function cloneFor(device: Device, clones: CloneEntry[]): CloneEntry | null {
   );
 }
 
+/** Where a device's own page lives: phones under Devices, the Mac and drives on the Overview. */
+const homeOf = (d: Device): Place => (d.kind === "mac" || d.kind === "drive" ? "overview" : "devices");
+
 /**
- * Choose a device from the switcher, press Scan, and see only what was
- * deleted or damaged on it. Or clone a phone, and move the clone onto a
- * new one. Three places, never disabled: Device, Results, Backups.
+ * Reco: scan this Mac, a drive or a phone, see only what was deleted or
+ * damaged, and recover photos one at a time or many at once. Five
+ * sections, never disabled: Overview, Photos, Files, Devices, Backups.
  *
- * Colour carries state and nothing else: the window is black while idle,
- * amber while Banker works, red once deleted items are on screen, green
- * when something has been saved. The `data-state` attribute on the shell
- * drives it (see styles.css).
+ * Colour says where you are: each section has one colour, worn by its tab,
+ * the window's glow, its main button and its progress (`data-section` on
+ * the shell, see styles.css). Green, orange and red appear only beside
+ * words, to say how something went.
  */
 export function App() {
   const [discovery, setDiscovery] = useState<Discovery>({ devices: [], hints: [] });
@@ -60,7 +66,7 @@ export function App() {
   const [scanned, setScanned] = useState<{ device: Device; summary: ScanSummary } | null>(null);
   const [sheet, setSheet] = useState<{ kind: "clone" | "restore"; device: Device } | null>(null);
   const [offer, setOffer] = useState<{ device: Device; clone: CloneEntry } | null>(null);
-  const [view, setView] = useState<Place>("device");
+  const [view, setView] = useState<Place>("overview");
   const [clones, setClones] = useState<CloneEntry[]>([]);
   const [location, setLoc] = useState<Location | null>(null);
   const seenPhones = useRef<Set<string> | null>(null);
@@ -91,7 +97,7 @@ export function App() {
       setDiscovery(found);
       setClones(await listClones().catch(() => [] as CloneEntry[]));
       setLoc(await getLocation().catch(() => null));
-      // A phone counts as arriving when it is plugged in while Banker is
+      // A phone counts as arriving when it is plugged in while Reco is
       // open, or becomes ready (it was waiting for Allow or Trust).
       const ready = found.devices.filter((d) => isPhone(d) && !d.problem);
       const before = seenPhones.current;
@@ -128,16 +134,16 @@ export function App() {
     };
   }, []);
 
-  const start = async (device: Device) => {
+  const start = async (device: Device, depth: Depth = "photos") => {
     setSelected(device);
-    setView("device");
+    setView(homeOf(device));
     setOffer(null);
-    setStage({ kind: "scanning", device, progress: null });
+    setStage({ kind: "scanning", device, depth, progress: null });
     try {
-      const summary = await scan(device);
+      const summary = await scan(device, depth);
       setScanned({ device, summary });
       setStage({ kind: "idle" });
-      setView("results");
+      setView("photos");
     } catch (cause) {
       setStage({ kind: "failed", message: message(cause) });
     }
@@ -178,11 +184,11 @@ export function App() {
 
   /** Scan a finished clone for deleted items, as if it were a backup. */
   const scanClone = (path: string, name: string) =>
-    void start({ id: `clone:${path}`, kind: "backup", name: `${name} (clone)`, detail: path, path, problem: null });
+    void start({ id: `clone:${path}`, kind: "backup", name: `${name} (clone)`, detail: path, path, problem: null }, "everything");
 
   /** "Transfer to another phone": use one that is already connected, or wait for it. */
   const transferFrom = (clone: CloneEntry) => {
-    setView("device");
+    setView("devices");
     const other = discovery.devices.find((d) => isPhone(d) && d.id !== clone.info.deviceId && !d.problem);
     if (other) {
       setSelected(other);
@@ -205,8 +211,8 @@ export function App() {
     stage.kind === "transferring";
   const done = stage.kind === "cloned" || stage.kind === "restored" || stage.kind === "transferred";
   const away = stage.kind === "awaiting" || stage.kind === "choosing";
-  const showResults = view === "results" && !working && !done && !away && scanned !== null;
-  const place: Place = working || done || away ? "device" : view;
+  const busyDevice = stage.kind === "awaiting" || stage.kind === "idle" || stage.kind === "failed" ? null : stage.device;
+  const place: Place = working || done || away ? (busyDevice ? homeOf(busyDevice) : "devices") : view;
   const percent = working && stage.progress?.percent != null ? ` ${stage.progress.percent}%` : "";
   const deviceState: DeviceState = !selected
     ? { tone: "none", line: "Nothing chosen yet" }
@@ -230,35 +236,21 @@ export function App() {
             ? { tone: "needs", line: "Needs you" }
             : scanned && scanned.device.id === selected.id && scanned.summary.findings > 0
               ? { tone: "deleted", line: `${scanned.summary.findings.toLocaleString()} found` }
-              : { tone: "ready", line: selected.kind === "drive" ? "Ready · read in place" : "Ready" };
-  const state = working
-    ? "working"
-    : done
-      ? "saved"
-      : showResults && scanned.summary.findings > 0
-        ? "found"
-        : "idle";
+              : {
+                  tone: "ready",
+                  line: selected.kind === "drive" || selected.kind === "mac" ? "Ready · read in place" : "Ready",
+                };
+  const phones = discovery.devices.filter(isPhone);
+  /** The device the Devices section shows: the chosen one, unless that is the Mac or a drive. */
+  const pageDevice =
+    selected && selected.kind !== "mac" && selected.kind !== "drive" ? selected : (phones[0] ?? null);
 
   const body = () => {
-    if (view === "results" && !scanned && !working && !done && !away) {
-      return (
-        <NoResults
-          device={selected}
-          onScan={() => selected && void start(selected)}
-          onDevice={() => setView("device")}
-        />
-      );
+    if (stage.kind === "scanning") {
+      return <ScanningView stage={stage} onCancel={() => void cancelScan()} />;
     }
-    if (view === "backups" && !working && !done && !away) {
-      return (
-        <Backups
-          location={location}
-          onLocation={setLoc}
-          finderBackups={discovery.devices.filter((d) => d.kind === "backup")}
-          onScan={(d) => void start(d)}
-          onTransfer={(clone) => transferFrom(clone)}
-        />
-      );
+    if (working) {
+      return <WorkingView stage={stage} onCancel={() => void cancelScan()} />;
     }
     switch (stage.kind) {
       case "cloned":
@@ -293,30 +285,97 @@ export function App() {
           />
         );
       default:
-        return showResults ? (
-          <Results device={scanned.device} summary={scanned.summary} onRescan={() => void start(scanned.device)} />
-        ) : (
-          <ScanPanel
-            device={selected}
-            stage={stage}
-            clones={clones}
-            lastScan={scanned && scanned.device.id === selected?.id ? scanned.summary : null}
+        break;
+    }
+    const failed = stage.kind === "failed" ? stage.message : null;
+    const mac = discovery.devices.find((d) => d.kind === "mac");
+    switch (view) {
+      case "overview":
+        return (
+          <Home
+            devices={discovery.devices}
+            location={location}
+            last={scanned}
+            failed={failed}
             onScan={(d) => void start(d)}
-            onClone={(d) => setSheet({ kind: "clone", device: d })}
-            onRestore={(d) => setSheet({ kind: "restore", device: d })}
-            onMove={(d, clone) => setStage({ kind: "choosing", device: d, clone })}
+            onOpenPhone={(d) => {
+              setSelected(d);
+              setView("devices");
+            }}
+            onSeeFound={() => setView("photos")}
+          />
+        );
+      case "photos":
+        return (
+          <Photos
+            scanned={scanned}
             location={location}
             onLocation={setLoc}
-            onOpenResults={() => setView("results")}
-            onChooseDevice={chooseDevice}
-            onCancel={() => void cancelScan()}
+            onScanMac={() => mac && void start(mac)}
+            onFiles={() => setView("files")}
           />
+        );
+      case "files":
+        return scanned ? (
+          <Results device={scanned.device} summary={scanned.summary} onRescan={() => void start(scanned.device)} />
+        ) : (
+          <NoResults
+            device={mac ?? null}
+            onScan={() => mac && void start(mac)}
+            onDevice={() => setView("overview")}
+          />
+        );
+      case "backups":
+        return (
+          <Backups
+            location={location}
+            onLocation={setLoc}
+            finderBackups={discovery.devices.filter((d) => d.kind === "backup")}
+            onScan={(d) => void start(d, "everything")}
+            onTransfer={(clone) => transferFrom(clone)}
+          />
+        );
+      case "devices":
+        return (
+          <>
+            {phones.length > 1 && (
+              <div className="device-pills" role="tablist" aria-label="Phones">
+                {phones.map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={pageDevice?.id === d.id}
+                    className={`chip ${pageDevice?.id === d.id ? "on" : ""}`}
+                    onClick={() => setSelected(d)}
+                  >
+                    {d.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <ScanPanel
+              device={pageDevice}
+              stage={stage}
+              clones={clones}
+              lastScan={scanned && scanned.device.id === pageDevice?.id ? scanned.summary : null}
+              onScan={(d, depth) => void start(d, depth)}
+              onClone={(d) => setSheet({ kind: "clone", device: d })}
+              onRestore={(d) => setSheet({ kind: "restore", device: d })}
+              onMove={(d, clone) => setStage({ kind: "choosing", device: d, clone })}
+              location={location}
+              onLocation={setLoc}
+              onOpenResults={() => setView("photos")}
+              onChooseDevice={chooseDevice}
+              onCancel={() => void cancelScan()}
+            />
+          </>
         );
     }
   };
 
   return (
-    <div className="shell" data-state={state}>
+    <div className="shell" data-section={place}>
       <TopBar
         discovery={discovery}
         clones={clones}
@@ -331,7 +390,7 @@ export function App() {
         }}
         onSelect={(d) => {
           setSelected(d);
-          setView("device");
+          setView(homeOf(d));
           if (stage.kind === "failed" || done || away) setStage({ kind: "idle" });
         }}
         onRefresh={() => void refresh()}

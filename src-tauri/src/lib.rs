@@ -16,7 +16,7 @@ use banker_core::clone::{CloneEntry, CloneOptions};
 use banker_core::devices::{Device, Discovery};
 use banker_core::export::Exported;
 use banker_core::preview::{CardPreview, Preview};
-use banker_core::scan::Progress;
+use banker_core::scan::{Depth, Progress};
 use banker_core::settings::Location;
 use banker_core::timeline::{Query, QueryResult};
 use banker_core::transfer::{Group, Item, Selection, Transferred};
@@ -75,6 +75,7 @@ async fn scan(
     app: AppHandle,
     session: State<'_, Session>,
     device: Device,
+    depth: Option<Depth>,
     tz_offset_minutes: i32,
 ) -> Result<ScanSummary, String> {
     let work = work_dir(&app)?;
@@ -87,6 +88,7 @@ async fn scan(
         };
         let report = banker_core::scan::scan_device(
             &device,
+            depth.unwrap_or_default(),
             &home(),
             now(),
             tz_offset_minutes,
@@ -326,6 +328,22 @@ async fn export(session: State<'_, Session>, query: Query) -> Result<Exported, S
     .await
 }
 
+/// Copy the picked items (one photo, or many) to the Save to location.
+#[tauri::command]
+async fn recover(
+    session: State<'_, Session>,
+    ids: Vec<u64>,
+    tz_offset_minutes: i32,
+) -> Result<Exported, String> {
+    let store = session.report.clone();
+    blocking(move || {
+        let report = store.lock().map_err(|e| e.to_string())?;
+        let report = report.as_ref().ok_or("Scan a device first.")?;
+        banker_core::export::recover(report, &ids, &home(), now(), tz_offset_minutes)
+    })
+    .await
+}
+
 #[tauri::command]
 fn reveal(path: String) -> Result<(), String> {
     banker_core::export::reveal(&path)
@@ -363,6 +381,7 @@ pub fn run() {
             card_preview,
             preview,
             export,
+            recover,
             reveal
         ])
         .run(tauri::generate_context!())

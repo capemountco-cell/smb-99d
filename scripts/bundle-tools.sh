@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Put the phone tools inside Banker.app, so iPhones and Android phones work on
+# Put the phone tools inside Reco.app, so iPhones and Android phones work on
 # a Mac with nothing installed.
 #
-#   iPhone:  idevice_id, ideviceinfo, idevicepair, idevicebackup2
-#            (libimobiledevice), with every library they load
+#   iPhone:  idevice_id, ideviceinfo, idevicepair, idevicebackup2, and
+#            afcclient when this libimobiledevice has it (the quick photo
+#            scan reads photos with it), with every library they load
 #   Android: adb (Android platform tools)
 #
 # They land in src-tauri/resources/tools/{bin,lib}, which tauri.conf.json
@@ -36,6 +37,11 @@ command -v adb >/dev/null || brew install --cask android-platform-tools
 
 prefix="$(brew --prefix)"
 ios_tools=(idevice_id ideviceinfo idevicepair idevicebackup2)
+if [[ -x "$prefix/bin/afcclient" ]]; then
+  ios_tools+=(afcclient)
+else
+  echo "bundle-tools: afcclient not in this libimobiledevice; iPhone quick photo scans will ask for Deep scan." >&2
+fi
 for t in "${ios_tools[@]}"; do
   cp -L "$prefix/bin/$t" "$out/bin/$t"
   chmod 755 "$out/bin/$t"
@@ -49,7 +55,7 @@ for t in "${ios_tools[@]}"; do fix+=(-x "$out/bin/$t"); done
 dylibbundler -of -b -cd -d "$out/lib" -p @executable_path/../lib/ "${fix[@]}"
 
 # Ad-hoc sign every binary and library after their load paths changed.
-# No hardened runtime: they run as Banker's helpers, not as apps.
+# No hardened runtime: they run as Reco's helpers, not as apps.
 for f in "$out"/bin/* "$out"/lib/*; do
   codesign --force --sign - "$f"
 done

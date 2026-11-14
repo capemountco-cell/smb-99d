@@ -94,7 +94,7 @@ export function Overview({ device, summary, saving, banner, onRescan, onPick, on
       <div className="headline">
         {n.deleted.total > 0 ? (
           <h1>
-            Banker found <span className="deleted-text">{count(n.deleted.total, "deleted item")}</span>{" "}
+            Reco found <span className="deleted-text">{count(n.deleted.total, "deleted item")}</span>{" "}
             on {device.name}
           </h1>
         ) : (

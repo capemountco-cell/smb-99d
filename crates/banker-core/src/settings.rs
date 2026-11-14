@@ -1,9 +1,11 @@
-//! Where Banker keeps what it copies: scan copies, clones and saved items.
+//! Where Reco keeps what it copies: recovered items, scan copies and clones.
 //!
-//! By default that is `~/Banker Backups`. The person can choose any folder
-//! instead, such as an external drive; Banker then uses `<that folder>/Banker
-//! Backups`. The choice lives in
-//! `~/Library/Application Support/Banker/settings.json`.
+//! By default that is `~/Reco`. The person can choose any folder instead,
+//! such as an external drive; Reco then uses `<that folder>/Reco`. The choice
+//! lives in `~/Library/Application Support/Reco/settings.json`.
+//!
+//! Reco was called Banker. Copies it made in `Banker Backups` folders are
+//! still found, and its old settings are still read.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,7 +13,9 @@ use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 
-pub const FOLDER: &str = "Banker Backups";
+pub const FOLDER: &str = "Reco";
+/// Where copies went when the app was called Banker.
+pub const LEGACY_FOLDER: &str = "Banker Backups";
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -24,7 +28,7 @@ pub struct Settings {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Location {
-    /// Where things are saved: `<chosen folder>/Banker Backups`.
+    /// Where things are saved: `<chosen folder>/Reco`.
     pub path: String,
     /// A short name: the drive's name, or "This Mac".
     pub label: String,
@@ -35,11 +39,14 @@ pub struct Location {
 }
 
 fn settings_path(home: &Path) -> PathBuf {
-    home.join("Library/Application Support/Banker/settings.json")
+    home.join("Library/Application Support/Reco/settings.json")
 }
 
 pub fn load(home: &Path) -> Settings {
     fs::read_to_string(settings_path(home))
+        .or_else(|_| {
+            fs::read_to_string(home.join("Library/Application Support/Banker/settings.json"))
+        })
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default()
@@ -74,13 +81,22 @@ pub fn save_root(home: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// Every folder Banker may have saved into: the default and the chosen one.
+/// Every folder Reco may have saved into: the default and the chosen one,
+/// plus the `Banker Backups` folders from before the rename, when present.
 /// Used to list clones and to accept a clone folder the window names.
 pub fn known_roots(home: &Path) -> Vec<PathBuf> {
     let mut roots = vec![default_root(home)];
     if let Some(chosen) = chosen_root(home) {
         if !roots.contains(&chosen) {
             roots.push(chosen);
+        }
+    }
+    let mut bases = vec![home.to_path_buf()];
+    bases.extend(load(home).save_to.map(PathBuf::from));
+    for base in bases {
+        let legacy = base.join(LEGACY_FOLDER);
+        if legacy.is_dir() && !roots.contains(&legacy) {
+            roots.push(legacy);
         }
     }
     roots
@@ -124,7 +140,7 @@ pub fn set_save_to(home: &Path, folder: Option<&str>) -> Result<Location, String
         let probe = dir.join(FOLDER).join(".banker-write-test");
         fs::create_dir_all(dir.join(FOLDER))
             .and_then(|_| fs::write(&probe, b"ok"))
-            .map_err(|e| format!("Banker cannot write to {folder}: {e}"))?;
+            .map_err(|e| format!("Reco cannot write to {folder}: {e}"))?;
         let _ = fs::remove_file(probe);
     }
     save(

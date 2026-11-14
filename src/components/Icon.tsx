@@ -22,6 +22,12 @@ const PATHS = {
       <path d="M9 5h6" />
     </>
   ),
+  mac: (
+    <>
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <path d="M8 20h8M12 16v4" />
+    </>
+  ),
   drive: (
     <>
       <rect x="3" y="7" width="18" height="10" rx="2.5" />

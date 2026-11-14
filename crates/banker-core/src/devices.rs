@@ -21,6 +21,8 @@ use crate::timeline::civil_from_days;
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum DeviceKind {
+    /// The Mac Reco runs on, read where it is.
+    Mac,
     Drive,
     Iphone,
     Android,
@@ -309,9 +311,38 @@ pub(crate) fn output(tool: &Path, args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr))
 }
 
+/// The startup disk's name in `diskutil info /` output.
+pub fn parse_volume_name(info: &str) -> Option<String> {
+    info.lines()
+        .find_map(|l| l.trim().strip_prefix("Volume Name:"))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// The Mac itself. It is always listed first and read where it is, so a
+/// scan of it never needs space.
+pub fn this_mac(home: &Path) -> Device {
+    let diskutil = Path::new("/usr/sbin/diskutil");
+    let volume = diskutil
+        .is_file()
+        .then(|| output(diskutil, &["info", "/"]))
+        .flatten()
+        .and_then(|i| parse_volume_name(&i))
+        .unwrap_or_else(|| "Macintosh HD".into());
+    Device {
+        id: "mac".into(),
+        kind: DeviceKind::Mac,
+        name: "This Mac".into(),
+        detail: format!("{volume} · read in place"),
+        path: Some(home.display().to_string()),
+        problem: None,
+    }
+}
+
 /// Everything connected or available right now.
 pub fn discover(home: &Path) -> Discovery {
     let mut d = Discovery::default();
+    d.devices.push(this_mac(home));
     let images = Path::new("/usr/bin/hdiutil")
         .is_file()
         .then(|| output(Path::new("/usr/bin/hdiutil"), &["info"]))
@@ -416,10 +447,10 @@ pub fn discover(home: &Path) -> Discovery {
         let product = phone.product.clone();
         let problem = match phone.kind {
             DeviceKind::Iphone if idevice.is_none() => {
-                "Banker cannot find its iPhone tools. Reinstall Banker, or see \"Not seeing a device?\".".to_string()
+                "Reco cannot find its iPhone tools. Reinstall Reco, or see \"Not seeing a device?\".".to_string()
             }
             DeviceKind::Iphone => format!("Unlock the {product} and tap Trust, then wait a few seconds."),
-            _ if !adb_found => "Banker cannot find its Android tools. Reinstall Banker, or see \"Not seeing a device?\".".to_string(),
+            _ if !adb_found => "Reco cannot find its Android tools. Reinstall Reco, or see \"Not seeing a device?\".".to_string(),
             _ => "Turn on USB debugging: Settings › About phone, tap Build number 7 times, then Developer options › USB debugging. Then tap Allow on the phone.".to_string(),
         };
         d.devices.push(Device {
@@ -462,7 +493,12 @@ pub fn backup_folder(root: &Path, device_name: &str, now_local: i64) -> PathBuf 
 
 /// Run a tool until it finishes or the user cancels. Its output goes to a
 /// log file in `dest`, so a chatty tool can never fill a pipe and stall.
-fn run(tool: &Path, args: &[&str], dest: &Path, cancel: &AtomicBool) -> Result<String, String> {
+pub(crate) fn run(
+    tool: &Path,
+    args: &[&str],
+    dest: &Path,
+    cancel: &AtomicBool,
+) -> Result<String, String> {
     run_with(tool, args, &[], dest, cancel, &mut |_| {})
 }
 
@@ -645,7 +681,7 @@ pub fn copy_to_mac(
     cancel: &AtomicBool,
 ) -> Result<(PathBuf, Option<String>), String> {
     match device.kind {
-        DeviceKind::Drive | DeviceKind::Backup | DeviceKind::Folder => device
+        DeviceKind::Mac | DeviceKind::Drive | DeviceKind::Backup | DeviceKind::Folder => device
             .path
             .as_ref()
             .map(|p| (PathBuf::from(p), None))
@@ -702,6 +738,20 @@ mod tests {
                 ),
                 ("emulator-5554".into(), "unauthorized".into(), None),
             ]
+        );
+    }
+
+    #[test]
+    fn this_mac_comes_first_and_reads_in_place() {
+        let home = temp_dir("mac");
+        let d = discover(&home);
+        assert_eq!(d.devices[0].kind, DeviceKind::Mac);
+        assert_eq!(d.devices[0].path.as_deref(), Some(home.to_str().unwrap()));
+        assert_eq!(
+            parse_volume_name(
+                "   Device Node: /dev/disk3s1\n   Volume Name:              Macintosh HD\n"
+            ),
+            Some("Macintosh HD".into())
         );
     }
 

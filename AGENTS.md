@@ -45,15 +45,20 @@ npm run dmg
 CI builds and verifies a `.dmg` on every push, so a packaging break shows up
 on the pull request that caused it.
 
-## Banker's own rules
+## Reco's own rules
 
 **Only deleted or damaged content is ever shown.** Every `Finding` is
 `Status::Deleted` or `Status::Corrupt`. Live files and live rows may be read
 to tell them apart (for example `live_text` in `sqlite.rs`), never reported.
 A new source of findings needs a test proving it does not surface live data.
 
-**Never write to a device.** Drives are scanned in place, read-only. Phones
-are copied to `~/Banker Backups/` first and the copy is scanned. Rebuilt
+**Never write to a device.** This Mac and drives are scanned in place,
+read-only. A phone's quick photo scan fetches only its deleted photos to the
+cache folder (`quick.rs`); a deep scan copies the phone to the Save to
+location (`~/Reco` by default) after `check_space`, and scans the copy.
+
+**Scanning never needs space.** Space is used for what the person picks to
+recover (`export::recover`), a deep scan or a clone, and is checked first. Rebuilt
 pictures and thumbnails go to the app's cache folder.
 
 **Recovery is checked against real SQLite.** `crates/banker-core/tests/`

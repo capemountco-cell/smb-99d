@@ -340,7 +340,7 @@ fn entry(folder: &Path, info: CloneInfo) -> CloneEntry {
 /// A folder the window names, checked to be a clone directly inside one of
 /// Banker's save folders, so no other folder can be read through it.
 pub fn clone_folder(home: &Path, folder: &str) -> Result<PathBuf, String> {
-    let not = || format!("{folder} is not a Banker clone.");
+    let not = || format!("{folder} is not a Reco clone.");
     let folder = fs::canonicalize(folder).map_err(|_| not())?;
     let inside = crate::settings::known_roots(home)
         .iter()
@@ -583,7 +583,7 @@ pub fn restore(
     progress: &mut dyn FnMut(&Progress),
 ) -> Result<String, String> {
     let text = fs::read_to_string(clone.join(INFO_FILE))
-        .map_err(|_| "This folder is not a Banker clone.")?;
+        .map_err(|_| "This folder is not a Reco clone.")?;
     let info: CloneInfo = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     if info.kind != device.kind {
         return Err("A clone can only be restored to the same kind of phone.".into());
@@ -794,7 +794,7 @@ mod tests {
     fn clones_are_listed_newest_first_and_know_what_they_can_do() {
         let home = temp_dir("clones");
         let make = |name: &str, created: i64, kind: DeviceKind, encrypted: bool| {
-            let folder = home.join("Banker Backups").join(name);
+            let folder = home.join(crate::settings::FOLDER).join(name);
             fs::create_dir_all(folder.join(BACKUP_DIR)).unwrap();
             let info = CloneInfo {
                 version: 1,
@@ -816,7 +816,7 @@ mod tests {
         };
         make("Old phone", 100, DeviceKind::Android, false);
         make("New phone", 200, DeviceKind::Iphone, true);
-        fs::create_dir_all(home.join("Banker Backups/not a clone")).unwrap();
+        fs::create_dir_all(home.join(crate::settings::FOLDER).join("not a clone")).unwrap();
 
         let list = list_clones(&home);
         assert_eq!(list.len(), 2);
@@ -833,7 +833,7 @@ mod tests {
     #[test]
     fn only_clones_inside_banker_backups_are_accepted() {
         let home = temp_dir("clone-folder");
-        let good = home.join("Banker Backups/Phone clone");
+        let good = home.join(crate::settings::FOLDER).join("Phone clone");
         fs::create_dir_all(&good).unwrap();
         fs::write(good.join(INFO_FILE), "{}").unwrap();
         let elsewhere = home.join("Elsewhere");

@@ -1,11 +1,11 @@
-import { count } from "../lib/format";
 import { useEffect, useState } from "react";
 
-import { bytes } from "../lib/format";
+import { bytes, count } from "../lib/format";
 import {
   deleteScanCopy,
   scanCopy,
   type CloneEntry,
+  type Depth,
   type Device,
   type Location,
   type Progress,
@@ -18,7 +18,7 @@ import { Icon, type IconName } from "./Icon";
 
 export type Stage =
   | { kind: "idle" }
-  | { kind: "scanning"; device: Device; progress: Progress | null }
+  | { kind: "scanning"; device: Device; depth: Depth; progress: Progress | null }
   | { kind: "cloning"; device: Device; progress: Progress | null; zip: boolean }
   | { kind: "restoring"; device: Device; progress: Progress | null }
   | { kind: "cloned"; device: Device; clone: CloneEntry }
@@ -37,7 +37,7 @@ interface Props {
   clones: CloneEntry[];
   /** The last scan of this device in this session, if any. */
   lastScan: ScanSummary | null;
-  onScan: (device: Device) => void;
+  onScan: (device: Device, depth: Depth) => void;
   onClone: (device: Device) => void;
   onRestore: (device: Device) => void;
   onMove: (device: Device, clone: CloneEntry) => void;
@@ -49,11 +49,12 @@ interface Props {
 }
 
 const CAPTION: Record<Device["kind"], string> = {
-  drive: "Banker reads the drive where it is and changes nothing on it",
-  folder: "Banker reads the folder where it is and changes nothing in it",
-  backup: "Banker reads this backup and changes nothing",
-  iphone: "Banker copies it to your Save to location first, and nothing on the phone changes",
-  android: "Banker copies it to your Save to location first, and nothing on the phone changes",
+  mac: "Reco reads this Mac where it is and copies nothing while it looks",
+  drive: "Reco reads the drive where it is and changes nothing on it",
+  folder: "Reco reads the folder where it is and changes nothing in it",
+  backup: "Reco reads this backup and changes nothing",
+  iphone: "Nothing on the phone changes",
+  android: "Nothing on the phone changes",
 };
 
 type Feature = { icon: IconName; label: string };
@@ -69,6 +70,7 @@ const DRIVE_FEATURES: Feature[] = [
 ];
 /** What a scan finds, worded for the kind of device. */
 const FEATURES: Record<Device["kind"], Feature[]> = {
+  mac: DRIVE_FEATURES,
   iphone: PHONE_FEATURES,
   android: PHONE_FEATURES,
   backup: PHONE_FEATURES,
@@ -100,9 +102,13 @@ function steps(stage: Working): Step[] {
     return mark(["Prepare the clone", "Restore"], /restor|copying the files/i.test(phase) ? 1 : 0);
   }
   const copies = stage.device.kind === "iphone" || stage.device.kind === "android";
+  if (copies && stage.depth === "photos") {
+    const at = /fetching/i.test(phase) ? 1 : /asking|reading the iphone/i.test(phase) ? 0 : 2;
+    return mark(["Find the deleted photos", "Fetch only those", "Get them ready to look at"], at);
+  }
   const copying = copies && /backing up|copying/i.test(phase);
   return copies
-    ? mark(["Copy to this Mac", "Look for deleted and damaged items"], copying ? 0 : 1)
+    ? mark(["Copy to the Save to location", "Look for deleted and damaged items"], copying ? 0 : 1)
     : mark(["Look for deleted and damaged items"], 0);
 }
 
@@ -113,7 +119,7 @@ const VERB: Record<Working["kind"], string> = {
   transferring: "Transferring to",
 };
 
-/** Amber: Banker is working. A percentage fills the ring when it is known. */
+/** Reco is working: the ring wears the section's colour, and fills when the percentage is known. */
 export function WorkingView({ stage, onCancel }: { stage: Working; onCancel: () => void }) {
   const p = stage.progress;
   const phase = p?.phase ?? "Starting…";
@@ -190,6 +196,7 @@ interface Action {
 }
 
 const KIND_NAME: Record<Device["kind"], string> = {
+  mac: "Mac",
   iphone: "iPhone",
   android: "Android phone",
   drive: "drive",
@@ -232,13 +239,12 @@ export function ScanPanel(props: Props) {
           <span className="chip-dot hollow" />
           No device chosen
         </span>
-        <h1 className="home-title">Find what was deleted</h1>
+        <h1 className="home-title">No phone connected</h1>
         <p className="home-lede">
-          Plug in an iPhone, an Android phone or a drive with a cable, then choose it from the
-          switcher at the top right. Banker lists only what was deleted or damaged.
+          Plug in an iPhone or an Android phone with a cable. It shows up here by itself.
         </p>
-        <button type="button" className="primary big" onClick={props.onChooseDevice}>
-          Choose a device
+        <button type="button" className="secondary big" onClick={props.onChooseDevice}>
+          Show every device
         </button>
       </div>
     );
@@ -308,19 +314,65 @@ export function ScanPanel(props: Props) {
         </p>
         {needs && <p className="needs-box">{needs}</p>}
         {stage.kind === "failed" && <p className="banner error selectable">{stage.message}</p>}
-        <div className="home-cta">
-          <button type="button" className="primary big" disabled={!!needs} onClick={() => onScan(device)}>
-            <Icon name="search" size={18} stroke={2.2} />
-            Scan for deleted items
-          </button>
-          {lastScan && (
-            <button type="button" className="text-button" onClick={props.onOpenResults}>
-              See the last results ›
+        {phone ? (
+          <div className="depth-cards">
+            <section className="depth-card recommended">
+              <div className="depth-head">
+                <h2>Quick photo scan</h2>
+                <span className="muted small-text">recommended</span>
+              </div>
+              <p className="muted">
+                Reads the deleted photos and videos straight off the phone. Nothing else is copied.
+              </p>
+              <ul className="depth-points">
+                <li><span className="status-mark ok" />Recently Deleted photos and videos, with previews</li>
+                <li><span className="status-mark ok" />Pick and recover them one at a time</li>
+              </ul>
+              <div className="depth-foot">
+                <button type="button" className="primary" disabled={!!needs} onClick={() => onScan(device, "photos")}>
+                  Scan photos
+                </button>
+                <span className="small-text">Space needed <strong>almost none</strong></span>
+              </div>
+            </section>
+            <section className="depth-card">
+              <div className="depth-head">
+                <h2>Deep scan</h2>
+                <span className="muted small-text">messages, notes, app data</span>
+              </div>
+              <p className="muted">
+                {device.kind === "iphone"
+                  ? "Apple only hands these over inside a backup, so the phone is copied once. The copy is reused next time."
+                  : "The whole phone is copied once, so app files can be read too. The copy is reused next time."}
+              </p>
+              <ul className="depth-points">
+                <li><span className="status-mark ok" />Deleted messages, notes and app records</li>
+                <li>
+                  <span className={`status-mark ${props.location?.available === false ? "bad" : "warn"}`} />
+                  Needs room for the whole phone on {props.location?.label ?? "this Mac"}
+                  {props.location?.freeBytes != null && ` (${bytes(props.location.freeBytes)} free)`}. Checked before it starts.
+                </li>
+              </ul>
+              <div className="depth-foot">
+                <button type="button" className="secondary" disabled={!!needs} onClick={() => onScan(device, "everything")}>
+                  Copy and scan
+                </button>
+                <SaveTo location={props.location} onChange={props.onLocation} compact />
+              </div>
+            </section>
+          </div>
+        ) : (
+          <div className="home-cta">
+            <button type="button" className="primary big" disabled={!!needs} onClick={() => onScan(device, "everything")}>
+              <Icon name="search" size={18} stroke={2.2} />
+              Scan for deleted items
             </button>
-          )}
-        </div>
-        {phone && (
-          <SaveTo location={props.location} onChange={props.onLocation} compact />
+          </div>
+        )}
+        {lastScan && (
+          <button type="button" className="text-button" onClick={props.onOpenResults}>
+            See the last results ›
+          </button>
         )}
         <div className="stat-tiles">
           <div className="stat">
@@ -356,12 +408,6 @@ export function ScanPanel(props: Props) {
             </div>
           )}
         </div>
-        {phone && (
-          <p className="small-text muted">
-            Apple only lets an iPhone be read through a backup, so a scan copies the phone to the
-            Save to location first. The copy is reused next time, and only what changed is added.
-          </p>
-        )}
       </section>
 
       <section className="home-side" aria-label={phone ? "More for this phone" : "What a scan finds"}>

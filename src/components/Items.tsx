@@ -99,7 +99,7 @@ export function FindingCard({
 }
 
 /** The item itself: the picture, a player, the document, or its text. */
-function Viewer({ finding: f }: { finding: Finding }) {
+export function Viewer({ finding: f }: { finding: Finding }) {
   const [shown, setShown] = useState<Preview | null>(null);
   const [failed, setFailed] = useState(false);
 

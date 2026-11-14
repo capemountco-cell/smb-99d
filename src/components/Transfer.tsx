@@ -109,7 +109,7 @@ export function AwaitingPhone({ clone, onCancel }: { clone: CloneEntry; onCancel
       </div>
       <h1 className="display">Connect the new phone</h1>
       <p className="lede narrow">
-        Unplug {clone.info.deviceName} and plug in the phone you are moving to. Banker offers the
+        Unplug {clone.info.deviceName} and plug in the phone you are moving to. Reco offers the
         transfer as soon as it appears. An Android phone needs USB debugging on.
       </p>
       <button type="button" className="ghost" onClick={onCancel}>

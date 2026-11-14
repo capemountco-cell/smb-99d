@@ -1,13 +1,20 @@
-# Banker
+# Reco
 
-A Mac app that shows what was **deleted** or is **damaged** on any device you
-plug in: a drive, an SD card, an iPhone or an Android phone. One press backs
-the phone up to the Mac (drives are read in place), then lays out everything
-deleted or damaged on a timeline you can zoom from years down to the minute.
-You can search it, filter it by app, and save it to the Mac sorted by app and
-day.
+A Mac app that finds what was **deleted** or is **damaged** on your Mac, any
+drive or SD card, an iPhone or an Android phone, and lets you recover it,
+photos first. Pick deleted photos one at a time (or many) and recover just
+those; everything else is on a timeline you can zoom from years down to the
+minute, searchable and filterable by app.
 
-Banker lists nothing else. Healthy files and live messages are read only to
+**Scanning needs no space.** This Mac and drives are read where they are. A
+phone's quick photo scan fetches only its deleted photos. Space is used only
+for what you choose to recover, or when you ask for a deep scan or a clone of
+a phone, and Reco checks it fits before starting.
+
+Reco was called Banker. Copies made then, in `Banker Backups` folders, are
+still found.
+
+Reco lists nothing else. Healthy files and live messages are read only to
 tell them apart from deleted ones, and are never shown.
 
 ## What it finds
@@ -25,13 +32,22 @@ as `WhatsApp/`). Pick an app to see everything deleted from it.
 
 ## What each device allows
 
-- **iPhone**: Banker makes a full local backup with libimobiledevice, then
-  reads it. That reaches Recently Deleted, deleted rows in every app's
+- **This Mac**: read in place: Photos' Recently Deleted, the Trash, deleted
+  messages and notes, and damaged photos and documents in Desktop,
+  Documents, Downloads, Pictures and Movies. Files that are only in iCloud
+  are skipped so nothing downloads. The Trash, Messages and Notes need Full
+  Disk Access.
+- **iPhone, quick photo scan**: the photo library is read over Apple's file
+  service (`afcclient`) and only the Recently Deleted photos are fetched.
+- **iPhone, deep scan**: Reco makes a full local backup with
+  libimobiledevice, then reads it. That reaches Recently Deleted, deleted rows in every app's
   databases, and damaged files. It cannot reach the phone's raw storage
   (Apple encrypts it), so a photo purged from Recently Deleted is gone.
   Encrypted backups are not supported yet: turn off "Encrypt local backup"
   in Finder first.
-- **Android**: Banker copies shared storage with `adb` (turn on USB debugging
+- **Android, quick photo scan**: the phone is asked where its trashed files
+  are and only those are pulled.
+- **Android, deep scan**: Reco copies shared storage with `adb` (turn on USB debugging
   on the phone). That reaches the phone's trash, app bins and damaged files.
   Most apps keep their databases in private storage that `adb` cannot read
   without root, so deleted messages on Android are usually out of reach.
@@ -42,10 +58,10 @@ as `WhatsApp/`). Pick an app to see everything deleted from it.
 
 ## Clone this device
 
-One button copies a whole phone to `~/Banker Backups/<name> clone <date>/`:
+One button copies a whole phone to `~/Reco/<name> clone <date>/`:
 
 - `Restore backup/`: the restorable copy. For an **iPhone** this is a
-  standard Apple backup, the format Finder makes, and Banker's *Restore from
+  standard Apple backup, the format Finder makes, and Reco's *Restore from
   a clone* erases an iPhone and restores it completely, onto the same phone
   or a new one (`idevicebackup2 restore`). Find My has to be off on the
   phone. Apps download again from the App Store with their data, as with
@@ -56,9 +72,9 @@ One button copies a whole phone to `~/Banker Backups/<name> clone <date>/`:
   `Files on iPhone/`, `Downloads/`, `Documents/`, `Audio/`: everything
   organised to browse, with original dates. On APFS these copies are clones
   of the backup's files and take no extra space.
-- `<name> <date>.zip` (optional): the restorable copy in one file. Banker
+- `<name> <date>.zip` (optional): the restorable copy in one file. Reco
   restores from it if the folder is gone.
-- `clone.json`: what the clone is, so Banker can list it.
+- `clone.json`: what the clone is, so Reco can list it.
 
 For **Android**, the clone holds every photo, video, download, document and
 app file in shared storage, organised the same way, and *Restore* copies them
@@ -67,7 +83,7 @@ rooting the phone, so an Android clone cannot rebuild a whole phone.
 
 ## Move a clone to a new phone
 
-Unplug the cloned phone and plug in the new one: Banker offers to transfer
+Unplug the cloned phone and plug in the new one: Reco offers to transfer
 the clone's files (also from *Transfer to another phone* on the finished
 clone). For an **Android** phone, pick whole groups (Photos & Videos, each
 app, Downloads, ...) or single files, or transfer everything. Photos and
@@ -86,9 +102,9 @@ brew install libimobiledevice          # iPhones and iPads
 brew install android-platform-tools    # Android phones
 ```
 
-The app says which is missing. Backups go to `~/Banker Backups/`.
+The app says which is missing. Backups go to `~/Reco/`.
 
-To scan the Mac's own Trash or Finder's iPhone backups, allow Banker Full
+To scan the Mac's own Trash or Finder's iPhone backups, allow Reco Full
 Disk Access in System Settings > Privacy & Security.
 
 ## Develop

@@ -257,6 +257,38 @@ pub fn export_matching(
     export(&picked, &dest, q.tz_offset_minutes)
 }
 
+/// Recover the findings the person picked, one or many, into a new dated
+/// folder in the Save to location. Space is checked first, and only what
+/// was picked is copied.
+pub fn recover(
+    report: &crate::model::Report,
+    ids: &[u64],
+    home: &Path,
+    now: i64,
+    tz_offset_minutes: i32,
+) -> Result<Exported, String> {
+    let picked: Vec<&Finding> = ids.iter().filter_map(|id| report.finding(*id)).collect();
+    if picked.is_empty() {
+        return Err("Pick at least one item to recover.".into());
+    }
+    let needed: u64 = picked
+        .iter()
+        .filter(|f| f.text.is_none())
+        .map(|f| f.size)
+        .sum();
+    let root = crate::settings::save_root(home)?;
+    crate::settings::check_space(&root, "what you picked", Some(needed), 0)?;
+    let dest =
+        crate::devices::backup_folder(&root, "Recovered", now + tz_offset_minutes as i64 * 60);
+    let out = export(&picked, &dest, tz_offset_minutes).map_err(|e| e.to_string())?;
+    if out.files == 0 && out.records == 0 {
+        return Err(
+            "Nothing could be recovered: the picked items have no data left on this Mac.".into(),
+        );
+    }
+    Ok(out)
+}
+
 /// Show a file in Finder.
 pub fn reveal(path: &str) -> Result<(), String> {
     Command::new("/usr/bin/open")

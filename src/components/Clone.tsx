@@ -140,7 +140,7 @@ export function CloneSheet({
         <span>
           <strong>Also make a .zip</strong>
           <span className="muted small-text">
-            The restorable copy in one file, to keep somewhere safe. Banker can restore from it.
+            The restorable copy in one file, to keep somewhere safe. Reco can restore from it.
             Needs about as much space again.
           </span>
         </span>

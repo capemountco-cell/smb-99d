@@ -39,6 +39,7 @@ export function when(unix: number | null, estimated: boolean): string {
 }
 
 export const DEVICE_ICON: Record<DeviceKind, IconName> = {
+  mac: "mac",
   drive: "drive",
   iphone: "iphone",
   android: "android",

@@ -1,4 +1,4 @@
-//! Banker's logic: find what was deleted or damaged on a device.
+//! Reco's logic (the crate keeps its first name, banker-core): find what was deleted or damaged on a device.
 //!
 //! Everything that makes a decision lives here, not in the Tauri crate and not
 //! in React. This crate does not depend on Tauri, so it builds and its tests
@@ -16,6 +16,7 @@ pub mod ios;
 pub mod model;
 pub mod paths;
 pub mod preview;
+pub mod quick;
 pub mod scan;
 pub mod settings;
 pub mod sqlite;

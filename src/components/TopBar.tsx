@@ -4,7 +4,7 @@ import { DEVICE_ICON, bytes } from "../lib/format";
 import type { CloneEntry, Device, Discovery } from "../lib/native";
 import { Icon } from "./Icon";
 
-export type Place = "device" | "results" | "backups";
+export type Place = "overview" | "photos" | "files" | "devices" | "backups";
 
 /** What the switcher says about the current device, and its colour. */
 export interface DeviceState {
@@ -12,9 +12,15 @@ export interface DeviceState {
   line: string;
 }
 
-const PLACES: { id: Place; label: string }[] = [
-  { id: "device", label: "Device" },
-  { id: "results", label: "Results" },
+/**
+ * Five sections. Each has its own colour (see styles.css): only its tab,
+ * the window's glow, its main button and its progress wear it.
+ */
+export const PLACES: { id: Place; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "photos", label: "Photos" },
+  { id: "files", label: "Files" },
+  { id: "devices", label: "Devices" },
   { id: "backups", label: "Backups" },
 ];
 
@@ -25,7 +31,7 @@ interface Props {
   selected: Device | null;
   state: DeviceState;
   place: Place;
-  /** True while Banker works; switching device waits until it is done. */
+  /** True while Reco works; switching device waits until it is done. */
   busy: boolean;
   onPlace: (place: Place) => void;
   onSelect: (device: Device) => void;
@@ -33,7 +39,7 @@ interface Props {
 }
 
 /**
- * The global bar: the Banker mark, three places that are never disabled,
+ * The global bar: the Reco mark, five sections that are never disabled,
  * and the device switcher, which says what state the device is in.
  */
 export function TopBar(props: Props) {
@@ -50,11 +56,11 @@ export function TopBar(props: Props) {
   return (
     <>
       <header className="globalnav">
-        <button type="button" className="brand" onClick={() => onPlace("device")}>
+        <button type="button" className="brand" onClick={() => onPlace("overview")}>
           <span className="brand-mark" aria-hidden>
-            B
+            R
           </span>
-          Banker
+          Reco
         </button>
         <nav aria-label="Main" className="places">
           {PLACES.map((p) => (

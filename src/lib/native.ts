@@ -1,7 +1,7 @@
 /**
  * Every call from the UI to Rust goes through this file, so the command
  * surface is visible in one place and argument shapes cannot drift.
- * The types mirror the serde shapes in crates/banker-core.
+ * The types mirror the serde shapes in crates/banker-core (Reco's core).
  */
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
@@ -26,7 +26,9 @@ export type Media =
   | "database"
   | "other";
 export type Zoom = "year" | "month" | "day" | "hour" | "minute";
-export type DeviceKind = "drive" | "iphone" | "android" | "backup" | "folder";
+export type DeviceKind = "mac" | "drive" | "iphone" | "android" | "backup" | "folder";
+/** Phones: "photos" fetches only deleted photos (no space needed); "everything" copies the phone first. */
+export type Depth = "photos" | "everything";
 
 export interface Finding {
   id: number;
@@ -231,8 +233,11 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 export const localOffsetMinutes = () => -new Date().getTimezoneOffset();
 
 export const discover = () => call<Discovery>("discover");
-export const scan = (device: Device) =>
-  call<ScanSummary>("scan", { device, tzOffsetMinutes: localOffsetMinutes() });
+export const scan = (device: Device, depth: Depth = "photos") =>
+  call<ScanSummary>("scan", { device, depth, tzOffsetMinutes: localOffsetMinutes() });
+/** Copy the picked items to the Save to location. */
+export const recover = (ids: number[]) =>
+  call<Exported>("recover", { ids, tzOffsetMinutes: localOffsetMinutes() });
 export const cancelScan = () => call<void>("cancel_scan");
 export const getLocation = () => call<Location>("get_location");
 export const setLocation = (folder: string | null) => call<Location>("set_location", { folder });
@@ -242,7 +247,7 @@ export const deleteScanCopy = (device: Device) => call<void>("delete_scan_copy",
 /** Ask for a folder in the standard macOS picker; null if cancelled. */
 export async function chooseFolder(): Promise<string | null> {
   if (!nativeAvailable()) return null;
-  const picked = await open({ directory: true, multiple: false, title: "Choose where Banker saves copies" });
+  const picked = await open({ directory: true, multiple: false, title: "Choose where Reco saves what it recovers" });
   return typeof picked === "string" ? picked : null;
 }
 export const cloneDevice = (device: Device, options: CloneOptions) =>

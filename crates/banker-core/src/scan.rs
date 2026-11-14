@@ -32,6 +32,42 @@ pub struct Progress {
 const MAX_DB_BYTES: u64 = 768 * 1024 * 1024;
 const MAX_FINDINGS: usize = 250_000;
 
+/// What a scan of this Mac reads, in order, with the words the window shows
+/// for each step. Paths are inside the home folder.
+pub const MAC_PARTS: &[(&str, &[&str])] = &[
+    ("Photos · Recently Deleted", &["Pictures"]),
+    ("Trash", &[".Trash"]),
+    (
+        "Messages and notes",
+        &[
+            "Library/Messages",
+            "Library/Group Containers/group.com.apple.notes",
+        ],
+    ),
+    (
+        "Desktop, Documents and Downloads",
+        &["Desktop", "Documents", "Downloads", "Movies"],
+    ),
+];
+
+const FULL_DISK_ACCESS: &str = "Some places on this Mac are private (the Trash, Messages, Notes). To include them, open System Settings > Privacy & Security > Full Disk Access, turn on Reco, then scan again.";
+
+/// A file that is only in iCloud. Reading it would download it, so a scan
+/// leaves it alone.
+fn in_cloud_only(meta: &fs::Metadata) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::macos::fs::MetadataExt;
+        const SF_DATALESS: u32 = 0x4000_0000;
+        meta.st_flags() & SF_DATALESS != 0
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = meta;
+        false
+    }
+}
+
 /// Folders that are system bookkeeping on a Mac volume, never user content.
 const SKIP_DIRS: &[&str] = &[
     ".Spotlight-V100",
@@ -110,22 +146,7 @@ impl Scanner<'_> {
         } else {
             self.scan_tree(folder, &mut report);
         }
-        if report.findings.len() >= MAX_FINDINGS {
-            report.note(format!(
-                "Stopped listing after {MAX_FINDINGS} findings. Narrow the scan to one folder to see the rest."
-            ));
-        }
-        if self.cancel.load(Ordering::Relaxed) {
-            report.note("The scan was stopped before it finished; these are the findings so far.");
-        }
-        (self.progress)(&Progress {
-            phase: "Done".into(),
-            files: report.files_checked,
-            findings: report.findings.len(),
-            current: String::new(),
-            percent: None,
-        });
-        report
+        self.finish(report)
     }
 
     fn tick(&mut self, report: &Report, phase: &str, current: &str) {
@@ -145,7 +166,13 @@ impl Scanner<'_> {
     }
 
     fn scan_tree(&mut self, root: &Path, report: &mut Report) {
-        let mut stack = vec![root.to_path_buf()];
+        self.scan_from(root, vec![root.to_path_buf()], "Checking files", report);
+    }
+
+    /// Walk `starts`, naming each file by its path from `root` (so a file in
+    /// `~/.Trash` reads as `.Trash/...` and is known to be trashed).
+    fn scan_from(&mut self, root: &Path, starts: Vec<PathBuf>, phase: &str, report: &mut Report) {
+        let mut stack = starts;
         let mut photo_libraries = Vec::new();
         while let Some(dir) = stack.pop() {
             if self.stop(report) {
@@ -154,9 +181,11 @@ impl Scanner<'_> {
             let Ok(entries) = fs::read_dir(&dir) else {
                 if dir == root {
                     report.note(format!(
-                        "Banker could not open {}. On a Mac, allow Full Disk Access in System Settings > Privacy & Security.",
+                        "Reco could not open {}. On a Mac, allow Full Disk Access in System Settings > Privacy & Security.",
                         root.display()
                     ));
+                } else if dir.parent() == Some(root) || dir.starts_with(root.join("Library")) {
+                    report.note(FULL_DISK_ACCESS);
                 }
                 continue;
             };
@@ -170,15 +199,16 @@ impl Scanner<'_> {
                 };
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if meta.is_dir() {
-                    if !SKIP_DIRS.contains(&name.as_str()) {
-                        if name.ends_with(".photoslibrary") {
-                            photo_libraries.push(path.clone());
-                        }
+                    if name.ends_with(".photoslibrary") {
+                        // Its deleted photos come from its database; its
+                        // thousands of internal files are not walked.
+                        photo_libraries.push(path);
+                    } else if !SKIP_DIRS.contains(&name.as_str()) {
                         stack.push(path);
                     }
                     continue;
                 }
-                if !meta.is_file() {
+                if !meta.is_file() || in_cloud_only(&meta) {
                     continue;
                 }
                 report.files_checked += 1;
@@ -187,20 +217,70 @@ impl Scanner<'_> {
                     .unwrap_or(&path)
                     .to_string_lossy()
                     .replace('\\', "/");
-                self.tick(report, "Checking files", &rel);
+                self.tick(report, phase, &rel);
                 self.examine(report, &path, &rel, &meta, None);
             }
         }
         for library in photo_libraries {
             let db = library.join("database").join("Photos.sqlite");
+            let wal = library.join("database").join("Photos.sqlite-wal");
             let resolve = |dir: &str, file: &str| {
                 ["originals", "Masters"]
                     .iter()
                     .map(|top| library.join(top).join(dir).join(file))
                     .find(|p| p.is_file())
             };
-            self.photos_library(report, &db, None, &resolve);
+            self.photos_library(report, &db, Some(&wal), &resolve);
         }
+    }
+
+    /// This Mac, read where it is: the places deleted things are kept, and
+    /// the folders where damaged photos and documents turn up. Nothing is
+    /// copied, so it needs no space.
+    pub fn scan_mac(&mut self, home: &Path) -> Report {
+        let mut report = Report {
+            root: home.display().to_string(),
+            ..Report::default()
+        };
+        let total = MAC_PARTS.len();
+        for (i, (label, dirs)) in MAC_PARTS.iter().enumerate() {
+            if self.stop(&report) {
+                break;
+            }
+            (self.progress)(&Progress {
+                phase: (*label).into(),
+                files: report.files_checked,
+                findings: report.findings.len(),
+                current: String::new(),
+                percent: Some((i * 100 / total) as u8),
+            });
+            let starts: Vec<PathBuf> = dirs
+                .iter()
+                .map(|d| home.join(d))
+                .filter(|p| p.exists())
+                .collect();
+            self.scan_from(home, starts, label, &mut report);
+        }
+        self.finish(report)
+    }
+
+    fn finish(&mut self, mut report: Report) -> Report {
+        if report.findings.len() >= MAX_FINDINGS {
+            report.note(format!(
+                "Stopped listing after {MAX_FINDINGS} findings. Narrow the scan to one folder to see the rest."
+            ));
+        }
+        if self.cancel.load(Ordering::Relaxed) {
+            report.note("The scan was stopped before it finished; these are the findings so far.");
+        }
+        (self.progress)(&Progress {
+            phase: "Done".into(),
+            files: report.files_checked,
+            findings: report.findings.len(),
+            current: String::new(),
+            percent: None,
+        });
+        report
     }
 
     /// Look at one file: trash, damage, and deleted records if it is a database.
@@ -477,10 +557,27 @@ pub fn scan_copy_dir(root: &Path, device: &Device) -> PathBuf {
     root.join("Scan copies").join(format!("{safe} {tail}"))
 }
 
-/// Everything one press of Scan does: copy a phone to the Save to location
-/// when needed (checking first that it fits), then scan the copy or the drive.
+/// How a scan reads a device.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Depth {
+    /// Phones: fetch only the deleted photos and videos. Needs almost no
+    /// space. Drives and this Mac are always read in place anyway.
+    #[default]
+    Photos,
+    /// Phones: copy the whole phone first (an iPhone backup), so deleted
+    /// messages, notes and app data can be read too.
+    Everything,
+}
+
+/// Everything one press of Scan does. This Mac and drives are read where
+/// they are and need no space. A phone either has only its deleted photos
+/// fetched (`Depth::Photos`), or is copied to the Save to location first,
+/// after checking it fits (`Depth::Everything`).
+#[allow(clippy::too_many_arguments)]
 pub fn scan_device(
     device: &Device,
+    depth: Depth,
     home: &Path,
     now: i64,
     tz_offset_minutes: i32,
@@ -488,9 +585,38 @@ pub fn scan_device(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(&Progress),
 ) -> Result<Report, String> {
-    let copies = matches!(device.kind, DeviceKind::Iphone | DeviceKind::Android);
     let _ = tz_offset_minutes;
-    let folder = if copies {
+    let phone = matches!(device.kind, DeviceKind::Iphone | DeviceKind::Android);
+    if device.kind == DeviceKind::Mac {
+        let mut scanner = Scanner {
+            now,
+            out: work.join("recovered"),
+            cancel,
+            progress,
+        };
+        let root = device
+            .path
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.to_path_buf());
+        return Ok(scanner.scan_mac(&root));
+    }
+    if phone && depth == Depth::Photos {
+        let folder = crate::quick::fetch(device, work, cancel, progress)?;
+        let mut scanner = Scanner {
+            now,
+            out: work.join("recovered"),
+            cancel,
+            progress,
+        };
+        let mut report = scanner.scan(&folder);
+        report.note(format!(
+            "Only the deleted photos and videos were fetched from {}. For deleted messages, notes and app data, use Deep scan.",
+            device.name
+        ));
+        return Ok(report);
+    }
+    let folder = if phone {
         let root = save_root(home)?;
         let dest = scan_copy_dir(&root, device);
         check_space(
@@ -523,7 +649,7 @@ pub fn scan_device(
     if let Some(w) = warning {
         report.note(w);
     }
-    if copies {
+    if phone {
         report.note(format!(
             "The scan copy is kept in {} so previews and saving work. The next scan of this phone reuses it. Delete it under Backups when you are done.",
             folder.display()
@@ -680,6 +806,44 @@ mod tests {
                 .any(|f| f.name == "IMG_20250301_101500.jpg" || f.name.contains("banker-copy-log")),
             "live files are never listed"
         );
+    }
+
+    #[test]
+    fn reads_this_mac_in_place() {
+        let home = temp_dir("mac-scan");
+        let j = tiny_jpeg();
+        fs::create_dir_all(home.join(".Trash")).unwrap();
+        fs::create_dir_all(home.join("Pictures")).unwrap();
+        fs::create_dir_all(home.join("Music/Library")).unwrap();
+        fs::write(home.join(".Trash/beach.jpg"), &j).unwrap();
+        fs::write(home.join("Pictures/fine.jpg"), &j).unwrap();
+        fs::write(home.join("Pictures/cut.jpg"), &j[..j.len() - 3]).unwrap();
+        // Outside the places a Mac scan reads.
+        fs::write(home.join("Music/Library/trimmed.jpg"), &j[..j.len() - 3]).unwrap();
+
+        let cancel = AtomicBool::new(false);
+        let mut phases = Vec::new();
+        let mut progress = |p: &Progress| phases.push(p.phase.clone());
+        let mut scanner = Scanner {
+            now: 1_760_000_000,
+            out: home.join("out"),
+            cancel: &cancel,
+            progress: &mut progress,
+        };
+        let report = scanner.scan_mac(&home);
+        let names: Vec<_> = report.findings.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"beach.jpg"), "{names:?}");
+        assert!(names.contains(&"cut.jpg"), "{names:?}");
+        assert!(!names.contains(&"fine.jpg"));
+        assert!(!names.contains(&"trimmed.jpg"));
+        let beach = report
+            .findings
+            .iter()
+            .find(|f| f.name == "beach.jpg")
+            .unwrap();
+        assert_eq!(beach.source, Source::TrashFolder);
+        assert!(phases.iter().any(|p| p == "Trash"), "{phases:?}");
+        assert_eq!(phases.last().map(String::as_str), Some("Done"));
     }
 
     #[test]

@@ -30,7 +30,7 @@ export function Backups({
     <div className="page">
       <div className="headline">
         <h1 className="display">Backups</h1>
-        <p className="lede">Clones made with Banker and iPhone backups Finder made.</p>
+        <p className="lede">Clones made with Reco and iPhone backups Finder made.</p>
       </div>
       <SaveTo location={location} onChange={onLocation} />
 
