@@ -1,0 +1,452 @@
+//! Showing and saving findings: thumbnails, and copying recovered items to
+//! a folder organised by app and day.
+
+use std::collections::HashMap;
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use crate::integrity::{sniff, Kind};
+use crate::model::{Finding, Media};
+use crate::paths::app_display_name;
+use crate::timeline::civil_from_days;
+use crate::util::base64;
+
+const INLINE_LIMIT: u64 = 4 * 1024 * 1024;
+
+/// macOS's own thumbnail tools. Off in tests: on a Mac with no logged-in
+/// desktop (CI), `qlmanage` waits forever.
+const USE_SYSTEM_TOOLS: bool = !cfg!(test);
+
+/// A thumbnail tool gets this long before Banker gives up on it and shows
+/// the item's icon instead, so one odd file can never freeze a preview.
+const TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Run a command quietly; true if it succeeded within `TOOL_TIMEOUT`.
+fn finishes(command: &mut Command) -> bool {
+    let Ok(mut child) = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if started.elapsed() < TOOL_TIMEOUT => {
+                std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+fn data_url(bytes: &[u8]) -> Option<String> {
+    let mime = match sniff(bytes) {
+        Some(Kind::Jpeg) => "image/jpeg",
+        Some(Kind::Png) => "image/png",
+        Some(Kind::Gif) => "image/gif",
+        _ if bytes.get(8..12) == Some(b"WEBP") => "image/webp",
+        _ => return None,
+    };
+    Some(format!("data:{mime};base64,{}", base64(bytes)))
+}
+
+/// A small picture of a finding, as a data URL, or None if it has none.
+///
+/// On a Mac, `sips` (pictures, including HEIC and RAW) and `qlmanage`
+/// (videos, PDFs) make a small JPEG or PNG, cached in `cache`. Elsewhere,
+/// small pictures are shown as they are.
+pub fn thumbnail(f: &Finding, cache: &Path) -> Option<String> {
+    let path = PathBuf::from(f.path.as_ref()?);
+    if !matches!(f.media, Media::Image | Media::Video | Media::Document) || !path.is_file() {
+        return None;
+    }
+    let cached = cache.join(format!("{}.jpg", f.id));
+    if let Ok(bytes) = fs::read(&cached) {
+        return data_url(&bytes);
+    }
+    let _ = fs::create_dir_all(cache);
+    if USE_SYSTEM_TOOLS && f.media == Media::Image && Path::new("/usr/bin/sips").is_file() {
+        let made = finishes(
+            Command::new("/usr/bin/sips")
+                .args(["-s", "format", "jpeg", "-Z", "360"])
+                .arg(&path)
+                .arg("--out")
+                .arg(&cached),
+        );
+        if made {
+            return data_url(&fs::read(&cached).ok()?);
+        }
+    }
+    if USE_SYSTEM_TOOLS && Path::new("/usr/bin/qlmanage").is_file() {
+        let dir = cache.join(format!("ql-{}", f.id));
+        let _ = fs::create_dir_all(&dir);
+        let ok = finishes(
+            Command::new("/usr/bin/qlmanage")
+                .args(["-t", "-s", "360", "-o"])
+                .arg(&dir)
+                .arg(&path),
+        );
+        if ok {
+            let png = fs::read_dir(&dir)
+                .ok()?
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .find(|p| p.extension().is_some_and(|e| e == "png"))?;
+            let bytes = fs::read(&png).ok()?;
+            let _ = fs::write(&cached, &bytes);
+            let _ = fs::remove_dir_all(&dir);
+            return data_url(&bytes);
+        }
+    }
+    if fs::metadata(&path).ok()?.len() <= INLINE_LIMIT {
+        return data_url(&fs::read(&path).ok()?);
+    }
+    None
+}
+
+fn day(t: Option<i64>, offset: i64) -> String {
+    match t {
+        Some(t) => {
+            let (y, m, d) = civil_from_days((t + offset).div_euclid(86_400));
+            format!("{y}-{m:02}-{d:02}")
+        }
+        None => "Undated".into(),
+    }
+}
+
+pub(crate) fn clean(name: &str) -> String {
+    let s: String = name
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | ':' | '\\' | '\0') {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let s = s.trim().trim_start_matches('.').to_string();
+    if s.is_empty() {
+        "item".into()
+    } else {
+        s
+    }
+}
+
+pub(crate) fn unique(path: PathBuf) -> PathBuf {
+    if !path.exists() {
+        return path;
+    }
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    (2..)
+        .map(|n| parent.join(format!("{stem} ({n}){ext}")))
+        .find(|p| !p.exists())
+        .unwrap_or(path)
+}
+
+#[derive(Debug, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Exported {
+    pub folder: String,
+    pub files: usize,
+    pub records: usize,
+    pub failed: usize,
+}
+
+/// Save findings into `dest/<App>/<YYYY-MM-DD>/`. Files are copied; text
+/// recovered from databases goes into one readable file per app and day.
+pub fn export(
+    findings: &[&Finding],
+    dest: &Path,
+    tz_offset_minutes: i32,
+) -> std::io::Result<Exported> {
+    let offset = tz_offset_minutes as i64 * 60;
+    fs::create_dir_all(dest)?;
+    let mut out = Exported {
+        folder: dest.display().to_string(),
+        ..Exported::default()
+    };
+    let mut notes: HashMap<PathBuf, String> = HashMap::new();
+    for f in findings {
+        let app = f
+            .app
+            .as_deref()
+            .map(app_display_name)
+            .unwrap_or_else(|| "Other".into());
+        let folder = dest.join(clean(&app)).join(day(f.time, offset));
+        if let Some(text) = &f.text {
+            let entry = notes
+                .entry(folder.join("Deleted messages and records.txt"))
+                .or_default();
+            let when = f.time.map(|t| {
+                let s = (t + offset).rem_euclid(86_400);
+                format!(
+                    "{:02}:{:02}{} ",
+                    s / 3600,
+                    s % 3600 / 60,
+                    if f.time_estimated { " (approx.)" } else { "" }
+                )
+            });
+            entry.push_str(&format!(
+                "{}{}\n{}\n\n",
+                when.unwrap_or_default(),
+                f.reason,
+                text
+            ));
+            out.records += 1;
+            continue;
+        }
+        let Some(src) = f.path.as_ref().map(PathBuf::from).filter(|p| p.is_file()) else {
+            continue;
+        };
+        let copied = fs::create_dir_all(&folder)
+            .and_then(|_| fs::copy(&src, unique(folder.join(clean(&f.name)))));
+        match copied {
+            Ok(_) => out.files += 1,
+            Err(_) => out.failed += 1,
+        }
+    }
+    for (path, text) in notes {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?
+            .write_all(text.as_bytes())?;
+    }
+    Ok(out)
+}
+
+/// Save every finding that matches `q` into a new, dated folder in the Save
+/// to location.
+pub fn export_matching(
+    report: &crate::model::Report,
+    q: &crate::timeline::Query,
+    home: &Path,
+    now: i64,
+) -> std::io::Result<Exported> {
+    let all = crate::timeline::Query {
+        limit: usize::MAX,
+        ..q.clone()
+    };
+    let result = crate::timeline::query(&report.findings, &all);
+    let picked: Vec<&Finding> = result.items.iter().collect();
+    let root = crate::settings::save_root(home).map_err(std::io::Error::other)?;
+    let dest =
+        crate::devices::backup_folder(&root, "Recovered", now + q.tz_offset_minutes as i64 * 60);
+    export(&picked, &dest, q.tz_offset_minutes)
+}
+
+/// True when a finding has something to recover: recovered text, or a file
+/// on this Mac with data in it.
+pub fn recoverable(f: &Finding) -> bool {
+    f.text.is_some()
+        || f.path
+            .as_ref()
+            .and_then(|p| fs::metadata(p).ok())
+            .is_some_and(|m| m.is_file() && m.len() > 0)
+}
+
+/// Recover the findings the person picked, one or many, into a new dated
+/// folder in the Save to location. Space is checked first, and only what
+/// was picked is copied.
+pub fn recover(
+    report: &crate::model::Report,
+    ids: &[u64],
+    home: &Path,
+    now: i64,
+    tz_offset_minutes: i32,
+) -> Result<Exported, String> {
+    let chosen: Vec<&Finding> = ids.iter().filter_map(|id| report.finding(*id)).collect();
+    if chosen.is_empty() {
+        return Err("Pick at least one item to recover.".into());
+    }
+    // An empty file has nothing in it; copying it would only make another
+    // empty file, so it is never counted as recovered.
+    let (picked, empty): (Vec<&Finding>, Vec<&Finding>) =
+        chosen.into_iter().partition(|f| recoverable(f));
+    if picked.is_empty() {
+        return Err(if empty.len() == 1 {
+            "That file is empty (0 bytes): nothing is left in it to recover.".into()
+        } else {
+            format!(
+                "Those {} files are empty (0 bytes): nothing is left in them to recover.",
+                empty.len()
+            )
+        });
+    }
+    let needed: u64 = picked
+        .iter()
+        .filter(|f| f.text.is_none())
+        .map(|f| f.size)
+        .sum();
+    let root = crate::settings::save_root(home)?;
+    crate::settings::check_space(&root, "what you picked", Some(needed), 0)?;
+    let dest =
+        crate::devices::backup_folder(&root, "Recovered", now + tz_offset_minutes as i64 * 60);
+    let mut out = export(&picked, &dest, tz_offset_minutes).map_err(|e| e.to_string())?;
+    out.failed += empty.len();
+    if out.files == 0 && out.records == 0 {
+        return Err(
+            "Nothing could be recovered: the picked items have no data left on this Mac.".into(),
+        );
+    }
+    Ok(out)
+}
+
+/// Can Reco read the private places on this Mac (the Trash, the Photos
+/// library, Messages)? macOS keeps them closed until the person turns on
+/// Full Disk Access. Probes folders that exist on every Mac.
+pub fn has_full_disk_access(home: &Path) -> bool {
+    let probes = [
+        "Library/Safari",
+        "Library/Mail",
+        "Library/Messages",
+        ".Trash",
+    ];
+    let mut any = false;
+    for p in probes {
+        match fs::read_dir(home.join(p)) {
+            Ok(_) => return true,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => any = true,
+            Err(_) => {}
+        }
+    }
+    // Nothing was refused (none of these folders exist): nothing is blocked.
+    !any
+}
+
+/// Open System Settings at Privacy & Security > Full Disk Access.
+pub fn open_full_disk_access() -> Result<(), String> {
+    Command::new("/usr/bin/open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        .status()
+        .map_err(|e| e.to_string())
+        .map(|_| ())
+}
+
+/// Show a file in Finder.
+pub fn reveal(path: &str) -> Result<(), String> {
+    Command::new("/usr/bin/open")
+        .args(["-R", path])
+        .status()
+        .map_err(|e| e.to_string())
+        .and_then(|s| {
+            s.success()
+                .then_some(())
+                .ok_or_else(|| "Finder could not show it.".into())
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::integrity::tests::{temp_dir, tiny_jpeg};
+    use crate::model::{Source, Status};
+
+    #[test]
+    fn exports_by_app_and_day() {
+        let dir = temp_dir("export");
+        let src = dir.join("a.jpg");
+        fs::write(&src, tiny_jpeg()).unwrap();
+        let mut photo = Finding::new(
+            Status::Deleted,
+            Source::TrashFolder,
+            Media::Image,
+            "a.jpg".into(),
+        );
+        photo.path = Some(src.display().to_string());
+        photo.app = Some("com.whatsapp".into());
+        photo.time = Some(crate::timeline::days_from_civil(2025, 6, 1) * 86_400 + 3600);
+        let twin = photo.clone();
+        let mut text = Finding::new(
+            Status::Deleted,
+            Source::DatabaseFragment,
+            Media::Text,
+            "chat.db".into(),
+        );
+        text.text = Some("hello again".into());
+        text.reason = "Deleted from chat.db".into();
+        text.app = Some("com.whatsapp".into());
+
+        let out = export(&[&photo, &twin, &text], &dir.join("out"), 0).unwrap();
+        assert_eq!((out.files, out.records, out.failed), (2, 1, 0));
+        let day = dir.join("out/WhatsApp/2025-06-01");
+        assert!(day.join("a.jpg").is_file());
+        assert!(day.join("a (2).jpg").is_file());
+        let notes =
+            fs::read_to_string(dir.join("out/WhatsApp/Undated/Deleted messages and records.txt"))
+                .unwrap();
+        assert!(notes.contains("hello again"));
+    }
+
+    #[test]
+    fn empty_files_are_never_recovered() {
+        let home = temp_dir("recover-empty");
+        let empty = home.join("IMG_6357.PNG");
+        fs::write(&empty, b"").unwrap();
+        let full = home.join("IMG_1.jpg");
+        fs::write(&full, tiny_jpeg()).unwrap();
+        let mut report = crate::model::Report::default();
+        for p in [&empty, &full] {
+            let mut f = Finding::new(
+                Status::Corrupt,
+                Source::DamagedFile,
+                Media::Image,
+                p.file_name().unwrap().to_string_lossy().into_owned(),
+            );
+            f.path = Some(p.display().to_string());
+            report.push(f);
+        }
+        let err = recover(&report, &[1], &home, 0, 0).unwrap_err();
+        assert!(err.contains("empty"), "{err}");
+        let out = recover(&report, &[1, 2], &home, 0, 0).unwrap();
+        assert_eq!((out.files, out.failed), (1, 1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_tool_that_hangs_is_given_up_on() {
+        let started = std::time::Instant::now();
+        assert!(finishes(Command::new("/bin/sh").args(["-c", "exit 0"])));
+        assert!(!finishes(Command::new("/bin/sh").args(["-c", "exit 3"])));
+        assert!(!finishes(&mut Command::new("/nonexistent/tool")));
+        assert!(started.elapsed() < TOOL_TIMEOUT);
+    }
+
+    #[test]
+    fn small_pictures_inline() {
+        let dir = temp_dir("thumb");
+        let src = dir.join("a.jpg");
+        fs::write(&src, tiny_jpeg()).unwrap();
+        let mut f = Finding::new(
+            Status::Deleted,
+            Source::TrashFolder,
+            Media::Image,
+            "a.jpg".into(),
+        );
+        f.path = Some(src.display().to_string());
+        let url = thumbnail(&f, &dir.join("cache")).unwrap();
+        assert!(url.starts_with("data:image/jpeg;base64,"));
+    }
+}
