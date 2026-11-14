@@ -14,6 +14,7 @@ import {
   cloneDevice,
   cloneGroups,
   discover,
+  fullDiskAccess,
   getLocation,
   listClones,
   nativeAvailable,
@@ -69,6 +70,7 @@ export function App() {
   const [view, setView] = useState<Place>("overview");
   const [clones, setClones] = useState<CloneEntry[]>([]);
   const [location, setLoc] = useState<Location | null>(null);
+  const [access, setAccess] = useState(true);
   const seenPhones = useRef<Set<string> | null>(null);
   const declined = useRef<Set<string>>(new Set());
   const stageRef = useRef(stage);
@@ -97,6 +99,7 @@ export function App() {
       setDiscovery(found);
       setClones(await listClones().catch(() => [] as CloneEntry[]));
       setLoc(await getLocation().catch(() => null));
+      setAccess(await fullDiskAccess().catch(() => true));
       // A phone counts as arriving when it is plugged in while Reco is
       // open, or becomes ready (it was waiting for Allow or Trust).
       const ready = found.devices.filter((d) => isPhone(d) && !d.problem);
@@ -297,6 +300,7 @@ export function App() {
             location={location}
             last={scanned}
             failed={failed}
+            access={access}
             onScan={(d) => void start(d)}
             onOpenPhone={(d) => {
               setSelected(d);

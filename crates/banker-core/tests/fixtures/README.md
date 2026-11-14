@@ -11,3 +11,9 @@ actually produces, not hand-built pages.
 - `contacts.db` and `contacts.db-wal`: WAL-mode table `contacts` with Alice
   Smith, Bob Jones and Carol White, checkpointed, then Bob Jones deleted.
   The deletion lives only in the WAL.
+- `mac-photos.sqlite`: the two tables of a Mac Photos library that Reco
+  reads. `ZASSET` has three assets (ids ending 1, 2 and 3); 1 and 2 are in
+  Recently Deleted (`ZTRASHEDSTATE` 1), 3 is not. `ZADDITIONALASSETATTRIBUTES`
+  gives their imported names, IMG_6352.JPG, IMG_6353.HEIC and IMG_6354.HEIC.
+  `tests/mac_photos.rs` gives asset 1 an original and asset 2 only previews,
+  as "Optimize Mac Storage" does.

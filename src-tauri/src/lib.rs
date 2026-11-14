@@ -345,6 +345,16 @@ async fn recover(
 }
 
 #[tauri::command]
+fn full_disk_access() -> bool {
+    banker_core::export::has_full_disk_access(&home())
+}
+
+#[tauri::command]
+fn open_full_disk_access() -> Result<(), String> {
+    banker_core::export::open_full_disk_access()
+}
+
+#[tauri::command]
 fn reveal(path: String) -> Result<(), String> {
     banker_core::export::reveal(&path)
 }
@@ -382,6 +392,8 @@ pub fn run() {
             preview,
             export,
             recover,
+            full_disk_access,
+            open_full_disk_access,
             reveal
         ])
         .run(tauri::generate_context!())

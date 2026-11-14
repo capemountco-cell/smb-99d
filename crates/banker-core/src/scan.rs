@@ -68,6 +68,47 @@ fn in_cloud_only(meta: &fs::Metadata) -> bool {
     }
 }
 
+/// A file with something in it. An empty file has nothing to recover.
+fn has_data(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() > 0)
+}
+
+/// The largest preview Photos keeps of each asset, by asset id. Previews
+/// are named `<UUID>_<kind>.jpeg` under `resources/derivatives`.
+fn derivative_index(dir: &Path) -> HashMap<String, PathBuf> {
+    let mut best: HashMap<String, (u64, PathBuf)> = HashMap::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&d) else {
+            continue;
+        };
+        for e in entries.filter_map(Result::ok) {
+            let path = e.path();
+            let Ok(meta) = e.metadata() else { continue };
+            if meta.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let name = e.file_name().to_string_lossy().to_ascii_uppercase();
+            let Some(uuid) = name
+                .get(..36)
+                .filter(|u| u.chars().filter(|c| *c == '-').count() == 4)
+            else {
+                continue;
+            };
+            let size = meta.len();
+            let slot = best.entry(uuid.to_string()).or_insert((0, path.clone()));
+            if size > slot.0 {
+                *slot = (size, path);
+            }
+        }
+    }
+    best.into_iter()
+        .filter(|(_, (size, _))| *size > 0)
+        .map(|(k, (_, p))| (k, p))
+        .collect()
+}
+
 /// Folders that are system bookkeeping on a Mac volume, never user content.
 const SKIP_DIRS: &[&str] = &[
     ".Spotlight-V100",
@@ -230,7 +271,13 @@ impl Scanner<'_> {
                     .map(|top| library.join(top).join(dir).join(file))
                     .find(|p| p.is_file())
             };
-            self.photos_library(report, &db, Some(&wal), &resolve);
+            let previews = derivative_index(&library.join("resources").join("derivatives"));
+            let preview = |a: &ios::TrashedAsset| {
+                a.uuid
+                    .as_ref()
+                    .and_then(|u| previews.get(&u.to_ascii_uppercase()).cloned())
+            };
+            self.photos_library(report, &db, Some(&wal), &resolve, &preview);
         }
     }
 
@@ -435,37 +482,54 @@ impl Scanner<'_> {
     }
 
     /// "Recently Deleted" photos and videos in a Photos library database.
+    /// `resolve` finds the original file; `preview` finds the full-size
+    /// preview Photos keeps when the original is only in iCloud.
     fn photos_library(
         &mut self,
         report: &mut Report,
         db_path: &Path,
         wal: Option<&Path>,
         resolve: &dyn Fn(&str, &str) -> Option<PathBuf>,
+        preview: &dyn Fn(&ios::TrashedAsset) -> Option<PathBuf>,
     ) {
-        let Ok(data) = fs::read(db_path) else { return };
+        let data = match fs::read(db_path) {
+            Ok(d) => d,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    report.note(FULL_DISK_ACCESS);
+                }
+                return;
+            }
+        };
         let Ok(mut db) = Db::parse(data) else { return };
         if let Some(w) = wal.and_then(|w| fs::read(w).ok()) {
             db.apply_wal(&w);
         }
         for asset in ios::trashed_assets(&db) {
-            let file = resolve(&asset.directory, &asset.filename);
+            let original = resolve(&asset.directory, &asset.filename).filter(|p| has_data(p));
+            let kept = if original.is_none() {
+                preview(&asset).filter(|p| has_data(p))
+            } else {
+                None
+            };
             let media = if asset.video {
                 Media::Video
             } else {
                 Media::Image
             };
-            let mut f = Finding::new(
-                Status::Deleted,
-                Source::PhotosRecentlyDeleted,
-                media,
-                asset.filename.clone(),
-            );
-            f.reason = if file.is_some() {
+            let name = asset
+                .original_name
+                .clone()
+                .unwrap_or_else(|| asset.filename.clone());
+            let mut f = Finding::new(Status::Deleted, Source::PhotosRecentlyDeleted, media, name);
+            f.reason = if original.is_some() {
                 "In Photos > Recently Deleted".into()
+            } else if kept.is_some() {
+                "In Photos > Recently Deleted. The original is only in iCloud; this is the full-size preview Photos kept on this device".into()
             } else {
-                "In Photos > Recently Deleted. Only its record is left; the file itself is gone"
-                    .into()
+                "In Photos > Recently Deleted. Only its record is left here; the file is gone or only in iCloud".into()
             };
+            let file = original.or(kept);
             f.size = file
                 .as_ref()
                 .and_then(|p| fs::metadata(p).ok())
@@ -526,7 +590,25 @@ impl Scanner<'_> {
                     .map(|e| e.stored_at(root))
                     .filter(|p| p.is_file())
             };
-            self.photos_library(report, &db.stored_at(root), wal.as_deref(), &resolve);
+            let preview = |a: &ios::TrashedAsset| {
+                by_path
+                    .get(&(
+                        "CameraRollDomain".to_string(),
+                        format!(
+                            "Media/PhotoData/Thumbnails/V2/{}/{}/5005.JPG",
+                            a.directory, a.filename
+                        ),
+                    ))
+                    .map(|e| e.stored_at(root))
+                    .filter(|p| p.is_file())
+            };
+            self.photos_library(
+                report,
+                &db.stored_at(root),
+                wal.as_deref(),
+                &resolve,
+                &preview,
+            );
         }
     }
 }

@@ -1,5 +1,5 @@
 import { bytes, count, DEVICE_ICON } from "../lib/format";
-import type { Device, Location, ScanSummary } from "../lib/native";
+import { openFullDiskAccess, type Device, type Location, type ScanSummary } from "../lib/native";
 import { Icon } from "./Icon";
 import type { Working } from "./ScanPanel";
 
@@ -22,6 +22,7 @@ export function Home({
   location,
   last,
   failed,
+  access,
   onScan,
   onOpenPhone,
   onSeeFound,
@@ -30,6 +31,8 @@ export function Home({
   location: Location | null;
   last: { device: Device; summary: ScanSummary } | null;
   failed: string | null;
+  /** False when macOS keeps the Trash, Photos library and Messages private. */
+  access: boolean;
   onScan: (device: Device) => void;
   onOpenPhone: (device: Device) => void;
   onSeeFound: () => void;
@@ -94,6 +97,18 @@ export function Home({
                 <span className="muted">read in place</span>
               </li>
             </ul>
+            {!access && (
+              <div className="access-box">
+                <p>
+                  <span className="status-mark warn" />
+                  macOS keeps the Photos library, the Trash and Messages private. Turn on Reco under
+                  Full Disk Access, then reopen Reco, or deleted photos won't be found.
+                </p>
+                <button type="button" className="secondary small" onClick={() => void openFullDiskAccess()}>
+                  Open Full Disk Access
+                </button>
+              </div>
+            )}
             <div className="ov-foot">
               <button type="button" className="primary big" onClick={() => onScan(mac)}>
                 <Icon name="search" size={16} stroke={2.2} />

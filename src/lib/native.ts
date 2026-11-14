@@ -270,6 +270,9 @@ export const preview = (id: number) => call<Preview>("preview", { id });
 export const fileUrl = (path: string) => convertFileSrc(path);
 export const exportMatching = (q: Query) => call<Exported>("export", { query: q });
 export const reveal = (path: string) => call<void>("reveal", { path });
+/** False when macOS is keeping the Trash, Photos library and Messages from Reco. */
+export const fullDiskAccess = () => call<boolean>("full_disk_access");
+export const openFullDiskAccess = () => call<void>("open_full_disk_access");
 
 export function onProgress(handler: (p: Progress) => void): Promise<UnlistenFn> {
   if (!nativeAvailable()) return Promise.resolve(() => {});

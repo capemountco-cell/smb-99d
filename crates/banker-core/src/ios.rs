@@ -87,6 +87,11 @@ pub struct TrashedAsset {
     /// e.g. `DCIM/100APPLE`
     pub directory: String,
     pub filename: String,
+    /// The asset's id, which names the previews Photos keeps of it.
+    pub uuid: Option<String>,
+    /// The name it had when it was imported (`IMG_1234.HEIC`), when known.
+    /// On a Mac, `filename` is the asset's id instead.
+    pub original_name: Option<String>,
     pub trashed_at: Option<i64>,
     pub created_at: Option<i64>,
     pub video: bool,
@@ -104,6 +109,16 @@ pub fn trashed_assets(db: &Db) -> Vec<TrashedAsset> {
             .filter(|v| *v > 0.0)
             .map(|v| v as i64 + MAC_EPOCH)
     };
+    // ZADDITIONALASSETATTRIBUTES.ZASSET points at ZASSET.Z_PK.
+    let names: HashMap<i64, String> = db
+        .table_rows("ZADDITIONALASSETATTRIBUTES")
+        .into_iter()
+        .filter_map(|r| {
+            let asset = r.get("ZASSET")?.as_i64()?;
+            let name = r.get("ZORIGINALFILENAME")?.as_str()?.to_string();
+            (!name.is_empty()).then_some((asset, name))
+        })
+        .collect();
     rows.into_iter()
         .filter(|row| row.get("ZTRASHEDSTATE").and_then(Value::as_i64) == Some(1))
         .filter_map(|row| {
@@ -114,6 +129,11 @@ pub fn trashed_assets(db: &Db) -> Vec<TrashedAsset> {
                     .unwrap_or("")
                     .to_string(),
                 filename: row.get("ZFILENAME")?.as_str()?.to_string(),
+                uuid: row.get("ZUUID").and_then(Value::as_str).map(str::to_string),
+                original_name: row
+                    .get("Z_PK")
+                    .and_then(Value::as_i64)
+                    .and_then(|pk| names.get(&pk).cloned()),
                 trashed_at: date(&row, "ZTRASHEDDATE"),
                 created_at: date(&row, "ZDATECREATED"),
                 video: row.get("ZKIND").and_then(Value::as_i64) == Some(1),

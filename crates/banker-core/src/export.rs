@@ -257,6 +257,16 @@ pub fn export_matching(
     export(&picked, &dest, q.tz_offset_minutes)
 }
 
+/// True when a finding has something to recover: recovered text, or a file
+/// on this Mac with data in it.
+pub fn recoverable(f: &Finding) -> bool {
+    f.text.is_some()
+        || f.path
+            .as_ref()
+            .and_then(|p| fs::metadata(p).ok())
+            .is_some_and(|m| m.is_file() && m.len() > 0)
+}
+
 /// Recover the findings the person picked, one or many, into a new dated
 /// folder in the Save to location. Space is checked first, and only what
 /// was picked is copied.
@@ -267,9 +277,23 @@ pub fn recover(
     now: i64,
     tz_offset_minutes: i32,
 ) -> Result<Exported, String> {
-    let picked: Vec<&Finding> = ids.iter().filter_map(|id| report.finding(*id)).collect();
-    if picked.is_empty() {
+    let chosen: Vec<&Finding> = ids.iter().filter_map(|id| report.finding(*id)).collect();
+    if chosen.is_empty() {
         return Err("Pick at least one item to recover.".into());
+    }
+    // An empty file has nothing in it; copying it would only make another
+    // empty file, so it is never counted as recovered.
+    let (picked, empty): (Vec<&Finding>, Vec<&Finding>) =
+        chosen.into_iter().partition(|f| recoverable(f));
+    if picked.is_empty() {
+        return Err(if empty.len() == 1 {
+            "That file is empty (0 bytes): nothing is left in it to recover.".into()
+        } else {
+            format!(
+                "Those {} files are empty (0 bytes): nothing is left in them to recover.",
+                empty.len()
+            )
+        });
     }
     let needed: u64 = picked
         .iter()
@@ -280,13 +304,45 @@ pub fn recover(
     crate::settings::check_space(&root, "what you picked", Some(needed), 0)?;
     let dest =
         crate::devices::backup_folder(&root, "Recovered", now + tz_offset_minutes as i64 * 60);
-    let out = export(&picked, &dest, tz_offset_minutes).map_err(|e| e.to_string())?;
+    let mut out = export(&picked, &dest, tz_offset_minutes).map_err(|e| e.to_string())?;
+    out.failed += empty.len();
     if out.files == 0 && out.records == 0 {
         return Err(
             "Nothing could be recovered: the picked items have no data left on this Mac.".into(),
         );
     }
     Ok(out)
+}
+
+/// Can Reco read the private places on this Mac (the Trash, the Photos
+/// library, Messages)? macOS keeps them closed until the person turns on
+/// Full Disk Access. Probes folders that exist on every Mac.
+pub fn has_full_disk_access(home: &Path) -> bool {
+    let probes = [
+        "Library/Safari",
+        "Library/Mail",
+        "Library/Messages",
+        ".Trash",
+    ];
+    let mut any = false;
+    for p in probes {
+        match fs::read_dir(home.join(p)) {
+            Ok(_) => return true,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => any = true,
+            Err(_) => {}
+        }
+    }
+    // Nothing was refused (none of these folders exist): nothing is blocked.
+    !any
+}
+
+/// Open System Settings at Privacy & Security > Full Disk Access.
+pub fn open_full_disk_access() -> Result<(), String> {
+    Command::new("/usr/bin/open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        .status()
+        .map_err(|e| e.to_string())
+        .map(|_| ())
 }
 
 /// Show a file in Finder.
@@ -342,6 +398,30 @@ mod tests {
             fs::read_to_string(dir.join("out/WhatsApp/Undated/Deleted messages and records.txt"))
                 .unwrap();
         assert!(notes.contains("hello again"));
+    }
+
+    #[test]
+    fn empty_files_are_never_recovered() {
+        let home = temp_dir("recover-empty");
+        let empty = home.join("IMG_6357.PNG");
+        fs::write(&empty, b"").unwrap();
+        let full = home.join("IMG_1.jpg");
+        fs::write(&full, tiny_jpeg()).unwrap();
+        let mut report = crate::model::Report::default();
+        for p in [&empty, &full] {
+            let mut f = Finding::new(
+                Status::Corrupt,
+                Source::DamagedFile,
+                Media::Image,
+                p.file_name().unwrap().to_string_lossy().into_owned(),
+            );
+            f.path = Some(p.display().to_string());
+            report.push(f);
+        }
+        let err = recover(&report, &[1], &home, 0, 0).unwrap_err();
+        assert!(err.contains("empty"), "{err}");
+        let out = recover(&report, &[1, 2], &home, 0, 0).unwrap();
+        assert_eq!((out.files, out.failed), (1, 1));
     }
 
     #[cfg(unix)]

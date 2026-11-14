@@ -201,7 +201,26 @@ fn iphone(
             sized.len(),
         );
         if size.is_none() {
-            continue; // Only its record is left; the scanner says so.
+            // The original is only in iCloud. The phone keeps a large
+            // preview; put it where the scanner looks for previews.
+            if let Some(uuid) = &a.uuid {
+                let thumb = format!(
+                    "/PhotoData/Thumbnails/V2/{}/{}/5005.JPG",
+                    a.directory, a.filename
+                );
+                let local = library
+                    .join("resources/derivatives")
+                    .join(format!("{uuid}_5005.jpeg"));
+                if let Some(parent) = local.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                if let Err(e) = get(&thumb, &local) {
+                    if e == "Stopped." {
+                        return Err(e);
+                    }
+                }
+            }
+            continue;
         }
         let local = library
             .join("originals")

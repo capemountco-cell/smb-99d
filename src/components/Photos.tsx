@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { SOURCE_LABEL, bytes, count, when } from "../lib/format";
 import {
   localOffsetMinutes,
+  openFullDiskAccess,
   query,
   recover,
   reveal,
@@ -101,10 +102,15 @@ export function Photos({
     };
   }, [scanned]);
 
-  const all = useMemo(() => {
+  /** Files with nothing in them: there is no photo to show or recover. */
+  const isEmpty = (f: Finding) => f.text === null && f.path !== null && f.size === 0;
+  const { all, empties } = useMemo(() => {
     const list = [...(images ?? []), ...(withVideos ? videos : [])];
-    return list.sort((a, b) => (b.time ?? -Infinity) - (a.time ?? -Infinity));
+    list.sort((a, b) => (b.time ?? -Infinity) - (a.time ?? -Infinity));
+    return { all: list.filter((f) => !isEmpty(f)), empties: list.filter(isEmpty).length };
   }, [images, videos, withVideos]);
+  const notes = scanned?.summary.notes ?? [];
+  const blocked = notes.some((n) => n.includes("Full Disk Access"));
 
   const shown = useMemo(() => {
     const test = FILTERS.find((f) => f.id === filter)?.test ?? (() => true);
@@ -125,7 +131,7 @@ export function Photos({
     return groups;
   }, [shown]);
 
-  const recoverable = (f: Finding) => f.path !== null;
+  const recoverable = (f: Finding) => f.path !== null && f.size > 0;
   const toggle = useCallback((f: Finding) => {
     if (!recoverable(f)) return;
     setPicked((p) => {
@@ -176,15 +182,32 @@ export function Photos({
   if (all.length === 0) {
     return (
       <div className="home empty-home">
-        <h1 className="home-title">No deleted photos on {scanned.device.name}</h1>
-        <p className="home-lede">
-          {scanned.summary.findings > 0
-            ? `It found ${count(scanned.summary.findings, "other deleted or damaged item")}, such as messages and documents.`
-            : "Nothing deleted or damaged turned up."}
-        </p>
-        {scanned.summary.findings > 0 && (
+        <h1 className="home-title">No deleted photos found on {scanned.device.name}</h1>
+        {blocked ? (
+          <>
+            <p className="home-lede">
+              macOS kept Reco out of the Photos library and the Trash, which is where deleted
+              photos are. Turn on Reco under Full Disk Access, reopen Reco, and scan again.
+            </p>
+            <button type="button" className="primary big" onClick={() => void openFullDiskAccess()}>
+              Open Full Disk Access
+            </button>
+          </>
+        ) : (
+          <p className="home-lede">
+            Photos' Recently Deleted and the Trash are empty. Photos deleted more than 30 days ago,
+            or emptied from Recently Deleted, are erased by macOS and cannot be brought back.
+          </p>
+        )}
+        {empties > 0 && (
+          <p className="muted">
+            {count(empties, "empty picture file")} left out: they are 0 bytes, so there is nothing in
+            them to recover.
+          </p>
+        )}
+        {scanned.summary.findings > empties && (
           <button type="button" className="secondary big" onClick={onFiles}>
-            See them in Files
+            See the other items in Files
           </button>
         )}
       </div>
@@ -235,10 +258,25 @@ export function Photos({
         )}
       </div>
 
+      {blocked && (
+        <p className="status-line">
+          <span className="status-mark warn" />
+          Some places were private (the Trash, Photos library or Messages), so there may be more.
+          <button type="button" className="text-button" onClick={() => void openFullDiskAccess()}>
+            Open Full Disk Access
+          </button>
+        </p>
+      )}
+      {empties > 0 && (
+        <p className="status-line muted">
+          {count(empties, "empty picture file")} left out: 0 bytes, nothing in them to recover.
+        </p>
+      )}
       {saving.kind === "saved" && (
         <p className="status-line">
           <span className="status-mark ok" />
-          Recovered {count(saving.result.files, "item")} to {saving.result.folder}
+          Recovered {count(saving.result.files, "item")}
+          {saving.result.failed > 0 && ` (${saving.result.failed} could not be copied)`} to {saving.result.folder}
           <button type="button" className="text-button" onClick={() => void reveal(saving.result.folder)}>
             Show in Finder
           </button>
