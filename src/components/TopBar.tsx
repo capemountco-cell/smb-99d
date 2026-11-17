@@ -4,7 +4,7 @@ import { DEVICE_ICON, bytes } from "../lib/format";
 import type { CloneEntry, Device, Discovery } from "../lib/native";
 import { Icon } from "./Icon";
 
-export type Place = "overview" | "photos" | "files" | "devices" | "backups";
+export type Place = "overview" | "photos" | "files" | "find" | "devices" | "backups";
 
 /** What the switcher says about the current device, and its colour. */
 export interface DeviceState {
@@ -13,13 +13,14 @@ export interface DeviceState {
 }
 
 /**
- * Five sections. Each has its own colour (see styles.css): only its tab,
+ * Six sections. Each has its own colour (see styles.css): only its tab,
  * the window's glow, its main button and its progress wear it.
  */
 export const PLACES: { id: Place; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "photos", label: "Photos" },
   { id: "files", label: "Files" },
+  { id: "find", label: "Find" },
   { id: "devices", label: "Devices" },
   { id: "backups", label: "Backups" },
 ];

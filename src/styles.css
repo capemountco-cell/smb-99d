@@ -43,6 +43,10 @@
   --damaged-text: #c9b6ff;
   --saved: #4ade80;
   --saved-text: #86efac;
+  /* Status colours, beside words only. Here so the Find window has them too. */
+  --ok: #4ade80;
+  --warn: #fb923c;
+  --bad: #f87171;
 }
 
 * {
@@ -3293,4 +3297,304 @@ button.secondary.big {
   border: 1px solid var(--line);
   font-size: 13px;
   line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ */
+/* Find: indigo                                                        */
+/* ------------------------------------------------------------------ */
+
+.shell[data-section="find"] {
+  --accent: #818cf8;
+  --accent-rgb: 129, 140, 248;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.find {
+  --accent: #818cf8;
+  --accent-rgb: 129, 140, 248;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: 20px;
+  background: rgba(19, 19, 22, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.find.inline .find-body {
+  height: 420px;
+}
+.find-window {
+  height: 100vh;
+  display: flex;
+  background: #131316;
+}
+.find-window .find {
+  flex: 1;
+  border-radius: 0;
+  border: none;
+}
+.find-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.find-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 21px;
+  color: var(--text);
+  caret-color: var(--accent);
+}
+.find-input:focus {
+  border: none;
+}
+.find kbd {
+  font: inherit;
+  font-size: 11px;
+  color: var(--faint);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.find-parts {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.find-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.14);
+  font-size: 13px;
+  font-weight: 500;
+}
+.find-chip span {
+  color: var(--muted);
+}
+.find-note {
+  padding: 10px 20px 0;
+}
+.find-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+}
+.find-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.find-example {
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+.find-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+}
+.find-list {
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+}
+.find-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  font-weight: 400;
+}
+.find-row.on {
+  background: rgba(var(--accent-rgb), 0.16);
+}
+.find-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.find-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.find-where {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.find-meta {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+.hit-thumb {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: var(--muted);
+}
+.hit-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hit-thumb.big {
+  width: 100%;
+  height: 170px;
+  border-radius: 12px;
+}
+.hit-thumb.big img {
+  object-fit: contain;
+}
+.hit-ext {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text);
+}
+.find-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+}
+.find-preview h2 {
+  font-size: 15px;
+  font-weight: 700;
+  word-break: break-word;
+}
+.find-actions {
+  margin-top: auto;
+  display: flex;
+  gap: 8px;
+}
+.find-actions button {
+  flex: 1;
+}
+.find-foot {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+.find-keys {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.find-page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 28px 40px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.find-settings {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.key-cap {
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  background: var(--surface-2);
+  font-size: 17px;
+  font-weight: 600;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+.check-row input {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+.exclude-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.find-where .status-mark {
+  width: 7px;
+  height: 7px;
+  margin: 0 6px 1px 0;
+  background: var(--warn);
+}
+@media (max-width: 1000px) {
+  .find-settings {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .find-body {
+    grid-template-columns: 1fr;
+  }
+  .find-preview {
+    display: none;
+  }
 }

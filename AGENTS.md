@@ -57,6 +57,12 @@ read-only. A phone's quick photo scan fetches only its deleted photos to the
 cache folder (`quick.rs`); a deep scan copies the phone to the Save to
 location (`~/Reco` by default) after `check_space`, and scans the copy.
 
+**Find shows live files, deliberately.** It is the one place Reco lists
+files that were not deleted, because the person searches for them; deleted
+ones are always marked. Its query parsing lives in `find.rs` and is tested;
+the shortcut is registered in the Tauri shell and checked by
+`find::check_shortcut`, which refuses macOS's own shortcuts.
+
 **Scanning never needs space.** Space is used for what the person picks to
 recover (`export::recover`), a deep scan or a clone, and is checked first. Rebuilt
 pictures and thumbnails go to the app's cache folder.

@@ -345,6 +345,19 @@ pub fn open_full_disk_access() -> Result<(), String> {
         .map(|_| ())
 }
 
+/// Open a file in the app macOS uses for it.
+pub fn open(path: &str) -> Result<(), String> {
+    Command::new("/usr/bin/open")
+        .arg(path)
+        .status()
+        .map_err(|e| e.to_string())
+        .and_then(|s| {
+            s.success()
+                .then_some(())
+                .ok_or_else(|| "macOS could not open it.".into())
+        })
+}
+
 /// Show a file in Finder.
 pub fn reveal(path: &str) -> Result<(), String> {
     Command::new("/usr/bin/open")

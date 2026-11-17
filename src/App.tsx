@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CloneDone, CloneSheet, RestoreDone, RestoreSheet } from "./components/Clone";
 import { Results } from "./components/Results";
 import { Backups } from "./components/Backups";
+import { FindSection } from "./components/Find";
 import { Home, ScanningView } from "./components/Home";
 import { Photos } from "./components/Photos";
 import { NoResults, ScanPanel, WorkingView, type Stage } from "./components/ScanPanel";
@@ -51,8 +52,9 @@ const homeOf = (d: Device): Place => (d.kind === "mac" || d.kind === "drive" ? "
 
 /**
  * Reco: scan this Mac, a drive or a phone, see only what was deleted or
- * damaged, and recover photos one at a time or many at once. Five
- * sections, never disabled: Overview, Photos, Files, Devices, Backups.
+ * damaged, and recover photos one at a time or many at once. Six
+ * sections, never disabled: Overview, Photos, Files, Find, Devices, Backups.
+ * Find also opens on its own, over any app, from a global shortcut.
  *
  * Colour says where you are: each section has one colour, worn by its tab,
  * the window's glow, its main button and its progress (`data-section` on
@@ -329,6 +331,8 @@ export function App() {
             onDevice={() => setView("overview")}
           />
         );
+      case "find":
+        return <FindSection />;
       case "backups":
         return (
           <Backups

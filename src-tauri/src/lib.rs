@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use banker_core::clone::{CloneEntry, CloneOptions};
 use banker_core::devices::{Device, Discovery};
 use banker_core::export::Exported;
+use banker_core::find::{FindSettings, Found};
 use banker_core::preview::{CardPreview, Preview};
 use banker_core::scan::{Depth, Progress};
 use banker_core::settings::Location;
@@ -22,7 +23,11 @@ use banker_core::timeline::{Query, QueryResult};
 use banker_core::transfer::{Group, Item, Selection, Transferred};
 use banker_core::Report;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[derive(Default)]
 struct Session {
@@ -359,18 +364,235 @@ fn reveal(path: String) -> Result<(), String> {
     banker_core::export::reveal(&path)
 }
 
+// ---- Find -------------------------------------------------------------
+
+/// Where apps are installed, to see which launchers might hold ⌥Space.
+fn apps_dir() -> PathBuf {
+    PathBuf::from("/Applications")
+}
+
+/// Show the Find panel over whatever app is in front, ready to type.
+fn show_find(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("find") {
+        let _ = w.center();
+        let _ = w.show();
+        let _ = w.set_focus();
+        let _ = w.emit("find-open", ());
+    }
+}
+
+fn toggle_find(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("find") {
+        if w.is_visible().unwrap_or(false) {
+            let _ = w.hide();
+        } else {
+            show_find(app);
+        }
+    }
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+/// Register the shortcut that opens Find. An app that already holds it
+/// makes macOS refuse, which is reported in words.
+fn register_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
+    let parsed: Shortcut = banker_core::find::normalize(shortcut)
+        .parse()
+        .map_err(|e| format!("Reco does not understand that shortcut: {e}"))?;
+    app.global_shortcut().register(parsed).map_err(|_| {
+        "Another app is already using that shortcut. Choose another, such as ⌃⌥Space.".to_string()
+    })
+}
+
+#[tauri::command]
+async fn find_files(
+    session: State<'_, Session>,
+    query: String,
+    drop: Vec<String>,
+    tz_offset_minutes: i32,
+) -> Result<Found, String> {
+    let store = session.report.clone();
+    blocking(move || {
+        let report = store.lock().map_err(|e| e.to_string())?.clone();
+        Ok(banker_core::find::find(
+            &query,
+            &drop,
+            report.as_ref(),
+            &home(),
+            now(),
+            tz_offset_minutes,
+        ))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn find_thumbnail(app: AppHandle, path: String) -> Result<Option<String>, String> {
+    let cache = work_dir(&app)?.join("thumbnails");
+    blocking(move || Ok(banker_core::find::thumbnail(&path, &cache))).await
+}
+
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    banker_core::export::open(&path)
+}
+
+#[tauri::command]
+async fn recover_paths(paths: Vec<String>, tz_offset_minutes: i32) -> Result<String, String> {
+    blocking(move || banker_core::find::recover_paths(&paths, &home(), now(), tz_offset_minutes))
+        .await
+}
+
+#[tauri::command]
+fn hide_find(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("find") {
+        let _ = w.hide();
+    }
+}
+
+#[tauri::command]
+fn open_main(app: AppHandle) {
+    hide_find(app.clone());
+    show_main_window(&app);
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FindPrefs {
+    #[serde(flatten)]
+    find: FindSettings,
+    starts_at_login: bool,
+}
+
+fn prefs(app: &AppHandle) -> FindPrefs {
+    FindPrefs {
+        find: banker_core::find::find_settings(&home(), &apps_dir()),
+        starts_at_login: app.autolaunch().is_enabled().unwrap_or(false),
+    }
+}
+
+#[tauri::command]
+fn get_find_settings(app: AppHandle) -> FindPrefs {
+    prefs(&app)
+}
+
+/// Change the shortcut: refuse macOS's own, register the new one, and only
+/// then let go of the old one, so Find is never left without a shortcut.
+#[tauri::command]
+fn set_find_shortcut(app: AppHandle, shortcut: String) -> Result<FindPrefs, String> {
+    banker_core::find::check_shortcut(&shortcut, &apps_dir())?;
+    let new = banker_core::find::normalize(&shortcut);
+    let old = prefs(&app).find.shortcut;
+    if banker_core::find::normalize(&old) == new {
+        return Ok(prefs(&app));
+    }
+    register_shortcut(&app, &new)?;
+    if let Ok(old) = banker_core::find::normalize(&old).parse::<Shortcut>() {
+        let _ = app.global_shortcut().unregister(old);
+    }
+    banker_core::find::update_find_settings(&home(), |s| s.find_shortcut = Some(new))?;
+    Ok(prefs(&app))
+}
+
+#[tauri::command]
+fn set_find_deleted(app: AppHandle, on: bool) -> Result<FindPrefs, String> {
+    banker_core::find::update_find_settings(&home(), |s| s.find_deleted = Some(on))?;
+    Ok(prefs(&app))
+}
+
+#[tauri::command]
+fn set_find_excludes(app: AppHandle, excludes: Vec<String>) -> Result<FindPrefs, String> {
+    banker_core::find::update_find_settings(&home(), |s| s.find_exclude = Some(excludes))?;
+    Ok(prefs(&app))
+}
+
+#[tauri::command]
+fn set_starts_at_login(app: AppHandle, on: bool) -> Result<FindPrefs, String> {
+    let launcher = app.autolaunch();
+    if on {
+        launcher.enable()
+    } else {
+        launcher.disable()
+    }
+    .map_err(|e| e.to_string())?;
+    Ok(prefs(&app))
+}
+
+/// Reco in the menu bar: Find, the window, and Quit (closing the window
+/// keeps Reco running so the shortcut keeps working).
+fn tray(app: &tauri::App) -> tauri::Result<()> {
+    let find = MenuItem::with_id(app, "find", "Find…", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open Reco", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Reco", true, None::<&str>)?;
+    let line = PredefinedMenuItem::separator(app)?;
+    let menu = Menu::with_items(app, &[&find, &open, &line, &quit])?;
+    let mut builder = TrayIconBuilder::with_id("reco")
+        .tooltip("Reco")
+        .menu(&menu)
+        .show_menu_on_left_click(true)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "find" => show_find(app),
+            "open" => show_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        });
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
 /// Build and run the application.
 pub fn run() {
     tauri::Builder::default()
         .manage(Session::default())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        toggle_find(app);
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             // The phone tools bundled inside the app (scripts/bundle-tools.sh).
             // The core looks there before PATH and Homebrew.
             if let Ok(dir) = app.path().resource_dir() {
                 std::env::set_var("BANKER_TOOLS_DIR", dir.join("tools").join("bin"));
             }
+            let shortcut = banker_core::find::find_settings(&home(), &apps_dir()).shortcut;
+            if let Err(e) = register_shortcut(app.handle(), &shortcut) {
+                eprintln!("Find shortcut {shortcut}: {e}");
+            }
+            if let Err(e) = tray(app) {
+                eprintln!("menu bar icon: {e}");
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| match event {
+            // Closing the window keeps Reco running, so ⌥Space still works.
+            WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            // The Find panel goes away when you click elsewhere.
+            WindowEvent::Focused(false) if window.label() == "find" => {
+                let _ = window.hide();
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             discover,
@@ -392,10 +614,30 @@ pub fn run() {
             preview,
             export,
             recover,
+            find_files,
+            find_thumbnail,
+            open_path,
+            recover_paths,
+            hide_find,
+            open_main,
+            get_find_settings,
+            set_find_shortcut,
+            set_find_deleted,
+            set_find_excludes,
+            set_starts_at_login,
             full_disk_access,
             open_full_disk_access,
             reveal
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to start the application");
+        .build(tauri::generate_context!())
+        .expect("failed to start the application")
+        .run(|app, event| {
+            // Clicking Reco in the Dock brings the window back.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_main_window(app);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
 }

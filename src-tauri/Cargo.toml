@@ -18,9 +18,11 @@ banker-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # protocol-asset: previews read the exact files the user opens (see `preview`).
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+tauri-plugin-autostart = "2"
 # The "Save to" location is chosen in a standard macOS folder picker.
 tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
 
 [features]
 # Turned on by `tauri build`. Serves the bundled frontend instead of devUrl.

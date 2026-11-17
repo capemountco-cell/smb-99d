@@ -30,6 +30,17 @@ Each finding is tied to the app it belongs to (from `Android/data/<package>`,
 iPhone backup domains, `~/Library/Containers/<bundle id>`, and folders such
 as `WhatsApp/`). Pick an app to see everything deleted from it.
 
+## Find any file
+
+Press **⌥Space** in any app (changeable; Reco never takes ⌘Space, which is
+Spotlight's) and type what you remember: "pdfs from gmail last week",
+"videos over 1 GB", "photos from Greece", "invoice for $2,000". Reco shows
+what it understood as chips you can remove, then the files. Live files come
+from Spotlight, asked fresh each time, so there is no index to keep in sync;
+deleted files come from the Trash and the last scan, with Recover beside
+them. Closing the window keeps Reco in the menu bar so the shortcut keeps
+working.
+
 ## What each device allows
 
 - **This Mac**: read in place: Photos' Recently Deleted, the Trash, deleted

@@ -11,6 +11,7 @@ pub mod carve;
 pub mod clone;
 pub mod devices;
 pub mod export;
+pub mod find;
 pub mod integrity;
 pub mod ios;
 pub mod model;

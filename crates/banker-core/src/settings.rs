@@ -18,10 +18,16 @@ pub const FOLDER: &str = "Reco";
 pub const LEGACY_FOLDER: &str = "Banker Backups";
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     /// The folder the person chose. None: their home folder.
     pub save_to: Option<String>,
+    /// The shortcut that opens Find, e.g. "Alt+Space". None: the default.
+    pub find_shortcut: Option<String>,
+    /// Whether Find lists deleted files too. None: yes.
+    pub find_deleted: Option<bool>,
+    /// Folders Find leaves out, `~` for home. None: the defaults.
+    pub find_exclude: Option<Vec<String>>,
 }
 
 /// The current "Save to" location, for the UI.
@@ -143,12 +149,9 @@ pub fn set_save_to(home: &Path, folder: Option<&str>) -> Result<Location, String
             .map_err(|e| format!("Reco cannot write to {folder}: {e}"))?;
         let _ = fs::remove_file(probe);
     }
-    save(
-        home,
-        &Settings {
-            save_to: folder.map(String::from),
-        },
-    )?;
+    let mut settings = load(home);
+    settings.save_to = folder.map(String::from);
+    save(home, &settings)?;
     Ok(location(home))
 }
 

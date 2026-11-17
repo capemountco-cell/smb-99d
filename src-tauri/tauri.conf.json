@@ -18,7 +18,22 @@
         "minWidth": 900,
         "minHeight": 600,
         "center": true,
-        "resizable": true
+        "resizable": true,
+        "label": "main"
+      },
+      {
+        "label": "find",
+        "title": "Find",
+        "width": 780,
+        "height": 560,
+        "visible": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "center": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "visibleOnAllWorkspaces": true,
+        "focus": true
       }
     ],
     "security": {

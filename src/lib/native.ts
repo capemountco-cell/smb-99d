@@ -278,3 +278,73 @@ export function onProgress(handler: (p: Progress) => void): Promise<UnlistenFn> 
   if (!nativeAvailable()) return Promise.resolve(() => {});
   return listen<Progress>("scan-progress", (event) => handler(event.payload));
 }
+
+// ---- Find ------------------------------------------------------------
+
+export interface FindPart {
+  /** Sent back in `drop` to take this piece away. */
+  key: string;
+  label: string;
+  value: string;
+}
+
+export interface FindHit {
+  path: string;
+  name: string;
+  media: Media;
+  size: number;
+  time: number | null;
+  place: string;
+  cameFrom: string | null;
+  deleted: { label: string; finding: number | null } | null;
+}
+
+export interface Found {
+  parts: FindPart[];
+  hits: FindHit[];
+  spotlight: boolean;
+}
+
+export interface FindPrefs {
+  shortcut: string;
+  warning: string | null;
+  includeDeleted: boolean;
+  excludes: string[];
+  startsAtLogin: boolean;
+}
+
+export const findFiles = (query: string, drop: string[]) =>
+  call<Found>("find_files", { query, drop, tzOffsetMinutes: localOffsetMinutes() });
+export const findThumbnail = (path: string) => call<string | null>("find_thumbnail", { path });
+export const openPath = (path: string) => call<void>("open_path", { path });
+export const recoverPaths = (paths: string[]) =>
+  call<string>("recover_paths", { paths, tzOffsetMinutes: localOffsetMinutes() });
+export const hideFind = () => call<void>("hide_find");
+export const openMain = () => call<void>("open_main");
+export const getFindSettings = () => call<FindPrefs>("get_find_settings");
+export const setFindShortcut = (shortcut: string) => call<FindPrefs>("set_find_shortcut", { shortcut });
+export const setFindDeleted = (on: boolean) => call<FindPrefs>("set_find_deleted", { on });
+export const setFindExcludes = (excludes: string[]) => call<FindPrefs>("set_find_excludes", { excludes });
+export const setStartsAtLogin = (on: boolean) => call<FindPrefs>("set_starts_at_login", { on });
+
+/** The window this page runs in: "main", or "find" for the Find panel. */
+export function windowLabel(): string {
+  if (!nativeAvailable()) return new URLSearchParams(location.search).has("find") ? "find" : "main";
+  const meta = (window as unknown as { __TAURI_INTERNALS__?: { metadata?: { currentWindow?: { label?: string } } } })
+    .__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+  return meta ?? "main";
+}
+
+export function onFindOpen(handler: () => void): Promise<UnlistenFn> {
+  if (!nativeAvailable()) return Promise.resolve(() => {});
+  return listen("find-open", () => handler());
+}
+
+/** "⌥Space" for "Alt+Space". */
+export function shortcutSymbols(shortcut: string): string {
+  const map: Record<string, string> = { Ctrl: "⌃", Alt: "⌥", Shift: "⇧", Cmd: "⌘" };
+  return shortcut
+    .split("+")
+    .map((p) => map[p] ?? p)
+    .join("");
+}
